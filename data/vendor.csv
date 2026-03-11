@@ -1,0 +1,11 @@
+vendor_id,name,email,phone,password_hash
+1,Manju's Canteen,manjus.v1@campus.edu,+914975022276,881cfb30b961f6f
+2,Amul Parlour,amul.v2@campus.edu,00063425608,9cbb93ea63d5e89
+3,Nescafe,nescafe.v3@campus.edu,07846404167,d2427562b9356c1
+4,Kappi Cafe,kappi.v4@campus.edu,+918105844101,212335d7bb1e82e
+5,Xerox & Print Shop,xerox.v5@campus.edu,+913556041352,4e9a94f257db078
+6,Maggi Point,maggi.v6@campus.edu,03597524317,e3474ba5e1ea650
+7,Night Canteen,night.v7@campus.edu,04903658955,fa4e692c3d7280c
+8,Raju Omelette Centre,raju.v8@campus.edu,3249425206,e6959bf4b602268
+9,Chai Tapri,chai.v9@campus.edu,03385351210,836faf834690bcc
+10,Fresh Juice Corner,fresh.v10@campus.edu,8424131263,109ad35319fc5e8
