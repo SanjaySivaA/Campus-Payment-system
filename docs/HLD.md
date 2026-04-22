@@ -27,6 +27,8 @@
 - STUDENT
 - VENDOR
 
+Limit function access to specific role(s)
+
 ### Functions (5)
 - Approve settlement      :  ADMIN
     - Dummy API Call to Bank 
@@ -37,9 +39,11 @@
     - TRIGGER on Bill table to update `settlement_id`
 - Issue Bill              : VENDOR
     - Update `balance` of student
+    
 
 ### Queries (5)
 - Authentication
+- and more
 
 ### Split
 - init fastapi backend, connector and ORM
@@ -53,3 +57,7 @@
 - Auth
 - curate db if needed
 - frontend
+
+## Indexes
+- Construct appropriate indexes and use it to optimize query execution
+- make use of : **Range queries <-> Btree index**. One of our queries can be a range query on some relation returned by a function.
