@@ -59,7 +59,7 @@ returns table (bill_id int, date date, vendor_id int, vendor_name varchar(50), a
 as $$
 begin
 	return query
-	select b.bill_id , b.date, v.vendor_id, v.name as name, b.total_amount
+	select b.bill_id , b.date, v.vendor_id, v.name as vendor_name, b.total_amount
 	from bill b
 	join vendor v using (vendor_id)
 	where b.student_id = p_student_id;
@@ -68,3 +68,4 @@ $$ language plpgsql;
 
 --- query using the above function
 select * from get_statement(1); 
+
