@@ -12,9 +12,6 @@ class StudentBase(BaseModel):
 class StudentResponse(StudentBase):
     balance: float
 
-    class Config:
-        from_attributes = True  # Allows Pydantic to read SQLAlchemy models
-
 # --- Feature 1: Price Comparison ---
 
 class PriceComparisonRequest(BaseModel):
@@ -46,6 +43,3 @@ class BillResponse(BaseModel):
     total_amount: float
     vendor_name: str
     items: List[BillItemSchema]
-
-    class Config:
-        from_attributes = True
