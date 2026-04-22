@@ -66,6 +66,24 @@ begin
 end;
 $$ language plpgsql;
 
---- query using the above function
+--- sample query using the above function
 select * from get_statement(1); 
+
+--------------------------------------------------------------------------------------------------
+
+-- function to compare the prices of a given item across different vendors
+create function compare_prices(p_item_id int)
+returns table (vendor_id int, vendor_name varchar(50), cost numeric, in_stock bool, last_updated timestamp without time zone)
+as $$
+begin
+	return query
+	select i.vendor_id, v.name as vendor_name, i.cost, i.in_stock bool, i.last_update_time
+	from inventory i
+	join vendor v using (vendor_id)
+	where i.item_id = p_item_id;
+end;
+$$ language plpgsql;
+
+-- sample query using the above function
+select * from compare_prices(50);
 
