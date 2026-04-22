@@ -49,3 +49,22 @@ CREATE TRIGGER trigger_settlement_insert
 AFTER INSERT ON Settlement
 FOR EACH ROW
 EXECUTE FUNCTION update_bills_after_settlement();
+
+
+-------------------------------------------------------------------------------------------------------
+
+--- function to get the purchase history of the student given his student_id
+create function get_statement(p_student_id INT)
+returns table (bill_id int, date date, vendor_id int, vendor_name varchar(50), amount numeric)
+as $$
+begin
+	return query
+	select b.bill_id , b.date, v.vendor_id, v.name as name, b.total_amount
+	from bill b
+	join vendor v using (vendor_id)
+	where b.student_id = p_student_id;
+end;
+$$ language plpgsql;
+
+--- query using the above function
+select * from get_statement(1); 
