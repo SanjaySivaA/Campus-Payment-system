@@ -122,3 +122,24 @@ $$ LANGUAGE plpgsql;
 
 -- Sample query to use the function:
 select approve_settlement(3, 1);
+
+--------------------------------------------------------------------------------------------------
+
+-- function to update student's bank balance
+CREATE OR REPLACE FUNCTION trigger_update_student_balance()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Deduct the bill's total amount from the student's balance
+    UPDATE Student
+    SET balance = balance - NEW.total_amount
+    WHERE student_id = NEW.student_id;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Bind the trigger to the Bill table
+CREATE TRIGGER after_bill_insert
+AFTER INSERT ON Bill
+FOR EACH ROW
+EXECUTE FUNCTION trigger_update_student_balance();
