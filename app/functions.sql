@@ -87,3 +87,38 @@ $$ language plpgsql;
 -- sample query using the above function
 select * from compare_prices(50);
 
+--------------------------------------------------------------------------------------------------
+
+-- function to approve settlements
+CREATE OR REPLACE FUNCTION approve_settlement(p_settlement_id INT, p_admin_id INT)
+RETURNS VOID AS $$
+DECLARE
+    v_current_status VARCHAR;
+BEGIN
+    -- Check if the settlement exists and get its current status
+    SELECT status INTO v_current_status 
+    FROM Settlement 
+    WHERE settlement_id = p_settlement_id;
+
+    IF v_current_status IS NULL THEN
+        RAISE EXCEPTION 'Settlement ID % does not exist.', p_settlement_id;
+    ELSIF v_current_status = 'paid' THEN
+        RAISE EXCEPTION 'Settlement ID % has already been paid.', p_settlement_id;
+    END IF;
+
+    -- Dummy API Call to Bank
+    RAISE NOTICE 'Initiating transfer for Settlement ID %...', p_settlement_id;
+    PERFORM pg_sleep(1.5); -- Simulates network delay for the bank API
+    RAISE NOTICE 'Bank transfer successful.';
+
+    -- Update the settlement status and assign the admin
+    UPDATE Settlement
+    SET status = 'paid',
+        admin_id = p_admin_id
+    WHERE settlement_id = p_settlement_id;
+
+END;
+$$ LANGUAGE plpgsql;
+
+-- Sample query to use the function:
+select approve_settlement(3, 1);
