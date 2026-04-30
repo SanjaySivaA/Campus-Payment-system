@@ -199,6 +199,7 @@ BEGIN
     WHERE vendor_id = p_vendor_id 
       AND item_id = p_item_id;
 
+    --error handling
     GET DIAGNOSTICS rows_affected = ROW_COUNT;
 
     IF rows_affected = 0 THEN
