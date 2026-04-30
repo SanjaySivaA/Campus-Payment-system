@@ -97,7 +97,13 @@ RETURNS VOID AS $$
 DECLARE
     v_current_status VARCHAR;
 BEGIN
-    -- Check if the settlement exists and get its current status
+    -- Authorization Check: Ensure the database user is the admin_role
+    -- Alternatively, you can verify if the provided p_admin_id exists in the Admin table
+    IF NOT EXISTS (SELECT 1 FROM Admin WHERE admin_id = p_admin_id) THEN
+        RAISE EXCEPTION 'Unauthorized: Invalid Admin ID (%).', p_admin_id;
+    END IF;
+
+    -- 1. Check if the settlement exists and get its current status
     SELECT status INTO v_current_status 
     FROM Settlement 
     WHERE settlement_id = p_settlement_id;
@@ -108,19 +114,20 @@ BEGIN
         RAISE EXCEPTION 'Settlement ID % has already been paid.', p_settlement_id;
     END IF;
 
-    -- Dummy API Call to Bank
+    -- 2. Dummy API Call to Bank
     RAISE NOTICE 'Initiating transfer for Settlement ID %...', p_settlement_id;
     PERFORM pg_sleep(1.5); -- Simulates network delay for the bank API
     RAISE NOTICE 'Bank transfer successful.';
 
-    -- Update the settlement status and assign the admin
+    -- 3. Update the settlement status and assign the admin
     UPDATE Settlement
     SET status = 'paid',
         admin_id = p_admin_id
     WHERE settlement_id = p_settlement_id;
 
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SECURITY DEFINER; -- Runs with privileges of the user who created it, but contains internal auth checks
 
 -- Sample query to use the function:
 select approve_settlement(3, 1);
