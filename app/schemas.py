@@ -2,6 +2,23 @@ from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
 from typing import List, Optional
 
+# from pydantic import BaseModel
+from datetime import date
+from decimal import Decimal
+
+
+# add other schemas
+
+class StatementItem(BaseModel):
+    bill_id: int
+    date: date
+    vendor_id: int
+    vendor_name: str
+    amount: Decimal
+
+    class Config:
+        from_attributes = True  
+
 # --- Base Schemas ---
 
 class StudentBase(BaseModel):
