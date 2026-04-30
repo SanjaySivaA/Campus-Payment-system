@@ -97,7 +97,13 @@ RETURNS VOID AS $$
 DECLARE
     v_current_status VARCHAR;
 BEGIN
-    -- Check if the settlement exists and get its current status
+    -- Authorization Check: Ensure the database user is the admin_role
+    -- Alternatively, you can verify if the provided p_admin_id exists in the Admin table
+    IF NOT EXISTS (SELECT 1 FROM Admin WHERE admin_id = p_admin_id) THEN
+        RAISE EXCEPTION 'Unauthorized: Invalid Admin ID (%).', p_admin_id;
+    END IF;
+
+    -- 1. Check if the settlement exists and get its current status
     SELECT status INTO v_current_status 
     FROM Settlement 
     WHERE settlement_id = p_settlement_id;
@@ -108,19 +114,20 @@ BEGIN
         RAISE EXCEPTION 'Settlement ID % has already been paid.', p_settlement_id;
     END IF;
 
-    -- Dummy API Call to Bank
+    -- 2. Dummy API Call to Bank
     RAISE NOTICE 'Initiating transfer for Settlement ID %...', p_settlement_id;
     PERFORM pg_sleep(1.5); -- Simulates network delay for the bank API
     RAISE NOTICE 'Bank transfer successful.';
 
-    -- Update the settlement status and assign the admin
+    -- 3. Update the settlement status and assign the admin
     UPDATE Settlement
     SET status = 'paid',
         admin_id = p_admin_id
     WHERE settlement_id = p_settlement_id;
 
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SECURITY DEFINER; -- Runs with privileges of the user who created it, but contains internal auth checks
 
 -- Sample query to use the function:
 select approve_settlement(3, 1);
@@ -151,30 +158,47 @@ CREATE OR REPLACE FUNCTION issue_bill(p_student_id INT, p_vendor_id INT, p_total
 RETURNS INT AS $$
 DECLARE
     v_current_balance NUMERIC;
+    v_spending_limit NUMERIC;
     v_new_bill_id INT;
 BEGIN
-    -- 1. Pre-check the student's balance
-    SELECT balance INTO v_current_balance 
+    -- Authorization Check: Ensure a valid vendor is issuing this
+    IF NOT EXISTS (SELECT 1 FROM Vendor WHERE vendor_id = p_vendor_id) THEN
+         RAISE EXCEPTION 'Unauthorized: Invalid Vendor ID (%).', p_vendor_id;
+    END IF;
+
+    -- 1. Get the student's balance and spending limit
+    -- Assuming spending_limit was added via: ALTER TABLE Student ADD COLUMN spending_limit NUMERIC DEFAULT 5000.00;
+    SELECT balance, spending_limit INTO v_current_balance, v_spending_limit
     FROM Student 
     WHERE student_id = p_student_id;
 
     IF v_current_balance IS NULL THEN
         RAISE EXCEPTION 'Student ID % not found.', p_student_id;
-    ELSIF v_current_balance < p_total_amount THEN
+    END IF;
+
+    -- 2. Apply the Business Rules
+    -- Rule A: Check Spending Limit
+    IF p_total_amount > v_spending_limit THEN
+         RAISE EXCEPTION 'Transaction Denied: Bill amount (%) exceeds the student''s spending limit (%).', p_total_amount, v_spending_limit;
+    END IF;
+
+    -- Rule B: Check Actual Balance
+    IF v_current_balance < p_total_amount THEN
         RAISE EXCEPTION 'Insufficient funds. Student balance is %, but bill is %.', v_current_balance, p_total_amount;
     END IF;
 
-    -- 2. Insert the new bill (settlement_id is left NULL initially)
-    -- The status is set to 'completed' as per the check constraint domain
+    -- 3. Insert the new bill 
     INSERT INTO Bill (student_id, vendor_id, total_amount, date, status)
     VALUES (p_student_id, p_vendor_id, p_total_amount, CURRENT_DATE, 'completed')
     RETURNING bill_id INTO v_new_bill_id;
 
-    -- The trigger 'after_bill_insert' automatically fires here and deducts the balance.
+    -- (The trigger we wrote earlier 'after_bill_insert' will automatically deduct the balance here)
 
     RETURN v_new_bill_id;
 END;
 $$ LANGUAGE plpgsql;
+
+
 
 -- Sample query to use the function:
 select issue_bill(1, 4, 150.50);
