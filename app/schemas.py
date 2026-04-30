@@ -1,11 +1,52 @@
 from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
 from typing import List, Optional
+from enum import Enum
 
 # from pydantic import BaseModel
 from datetime import date
 from decimal import Decimal
 
+class RoleEnum(str, Enum):
+    student = "student"
+    vendor = "vendor"
+    admin = "admin"
+
+# --------------------------- Authentication Schemas ------------------------------ #
+
+class LoginRequest(BaseModel):
+    user_id: int
+    password: str
+    role: RoleEnum
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    user_id: Optional[int] = None
+    role: Optional[str] = None
+
+class StudentCreate(BaseModel):
+    student_id: int
+    # Enforce max lengths to match your PostgreSQL column limits
+    first_name: str = Field(..., max_length=20)
+    last_name: str = Field(..., max_length=20)
+    email: EmailStr = Field(..., max_length=255) 
+    phone: str = Field(..., max_length=15)
+    
+    # Password doesn't need a max_length here because it gets hashed to 60 chars anyway,
+    # but you can add a min_length for security
+    password: str = Field(..., min_length=4) 
+    weekly_spending_limit: Decimal
+
+class VendorCreate(BaseModel):
+    vendor_id: int
+    name: str = Field(..., max_length=100)
+    email: EmailStr = Field(..., max_length=255)
+    phone: str = Field(..., max_length=15)
+    password: str = Field(..., min_length=4)
+# --------------------------------------------------------------------------------- #
 
 # add other schemas
 

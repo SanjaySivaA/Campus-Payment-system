@@ -13,14 +13,19 @@
 #     return db_student
 
 # from fastapi import APIRouter, Depends, HTTPException
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 from typing import List
-from . import crud, schemas
+from datetime import timedelta
+
+from . import crud, schemas, auth
 from .database import get_raw_db_conn
 
 # app = APIRouter()
 
 app = FastAPI(title="Campus Payment System API")
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 @app.get("/")
 def read_root():
@@ -40,3 +45,52 @@ def read_student_statement(student_id: int, conn = Depends(get_raw_db_conn)):
     # FastAPI and Pydantic will automatically parse the RealDictCursor output
     # into the JSON format defined by the StatementItem schema.
     return statement_rows
+
+# ----------------- Authentication endpoints begin --------------------------------------- #
+
+@app.post("/signup/student", status_code=status.HTTP_201_CREATED)
+def signup_student(student: schemas.StudentCreate, conn = Depends(get_raw_db_conn)):
+    print(f"DEBUG: Password string received: '{student.password}'")
+    print(f"DEBUG: Password length: {len(student.password)}")
+    hashed_pw = auth.get_password_hash(student.password)
+    try:
+        student_id = crud.create_student(conn, student, hashed_pw)
+        return {"message": "Student account created successfully", "student_id": student_id}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/signup/vendor", status_code=status.HTTP_201_CREATED)
+def signup_vendor(vendor: schemas.VendorCreate, conn = Depends(get_raw_db_conn)):
+    hashed_pw = auth.get_password_hash(vendor.password)
+    try:
+        vendor_id = crud.create_vendor(conn, vendor, hashed_pw)
+        return {"message": "Vendor account created successfully", "vendor_id": vendor_id}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/login", response_model=schemas.Token)
+def login(req: schemas.LoginRequest, conn = Depends(get_raw_db_conn)):
+    # Look up the user in the correct table based on their role
+    user = crud.get_user_auth(conn, user_id=req.user_id, role=req.role.value)
+    
+    # Verify existence and password
+    if not user or not auth.verify_password(req.password, user['password_hash']):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect ID or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        
+    access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+    # Embed the role directly in the JWT token payload
+    access_token = auth.create_access_token(
+        data={"sub": str(user['id']), "role": req.role.value}, 
+        expires_delta=access_token_expires
+    )
+    
+    return {"access_token": access_token, "token_type": "bearer"}
+
+# ----------------- Authentication endpoints end --------------------------------------- #
