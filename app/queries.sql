@@ -13,5 +13,20 @@ select *
 from bill
 where amount > 100 and vendor id = 1;
 
+-- some useful indexes
+CREATE INDEX idx_bill_student_id ON bill USING btree (student_id);
+create index idx_bill_total_amount on bill using btree(total_amount);
+
+
+-- force the planner to use an index
+-- SET enable_seqscan = OFF; 
+
+EXPLAIN ANALYZE
+SELECT * FROM student
+WHERE student_id = 3;
+
+-- enable seq. scan
+-- SET enable_seqscan = ON;
+
 --- try more useful range based queries to introduce some btree indexes
 --- those indexes also can be added here
