@@ -87,3 +87,92 @@ $$ language plpgsql;
 -- sample query using the above function
 select * from compare_prices(50);
 
+--------------------------------------------------------------------------------------------------
+
+-- function to approve settlements
+CREATE OR REPLACE FUNCTION approve_settlement(p_settlement_id INT, p_admin_id INT)
+RETURNS VOID AS $$
+DECLARE
+    v_current_status VARCHAR;
+BEGIN
+    -- Check if the settlement exists and get its current status
+    SELECT status INTO v_current_status 
+    FROM Settlement 
+    WHERE settlement_id = p_settlement_id;
+
+    IF v_current_status IS NULL THEN
+        RAISE EXCEPTION 'Settlement ID % does not exist.', p_settlement_id;
+    ELSIF v_current_status = 'paid' THEN
+        RAISE EXCEPTION 'Settlement ID % has already been paid.', p_settlement_id;
+    END IF;
+
+    -- Dummy API Call to Bank
+    RAISE NOTICE 'Initiating transfer for Settlement ID %...', p_settlement_id;
+    PERFORM pg_sleep(1.5); -- Simulates network delay for the bank API
+    RAISE NOTICE 'Bank transfer successful.';
+
+    -- Update the settlement status and assign the admin
+    UPDATE Settlement
+    SET status = 'paid',
+        admin_id = p_admin_id
+    WHERE settlement_id = p_settlement_id;
+
+END;
+$$ LANGUAGE plpgsql;
+
+-- Sample query to use the function:
+select approve_settlement(3, 1);
+
+--------------------------------------------------------------------------------------------------
+
+-- function to update student's bank balance
+CREATE OR REPLACE FUNCTION trigger_update_student_balance()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Deduct the bill's total amount from the student's balance
+    UPDATE Student
+    SET balance = balance - NEW.total_amount
+    WHERE student_id = NEW.student_id;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Bind the trigger to the Bill table
+CREATE TRIGGER after_bill_insert
+AFTER INSERT ON Bill
+FOR EACH ROW
+EXECUTE FUNCTION trigger_update_student_balance();
+
+-- function to verify student has enough funds before insert
+CREATE OR REPLACE FUNCTION issue_bill(p_student_id INT, p_vendor_id INT, p_total_amount NUMERIC)
+RETURNS INT AS $$
+DECLARE
+    v_current_balance NUMERIC;
+    v_new_bill_id INT;
+BEGIN
+    -- 1. Pre-check the student's balance
+    SELECT balance INTO v_current_balance 
+    FROM Student 
+    WHERE student_id = p_student_id;
+
+    IF v_current_balance IS NULL THEN
+        RAISE EXCEPTION 'Student ID % not found.', p_student_id;
+    ELSIF v_current_balance < p_total_amount THEN
+        RAISE EXCEPTION 'Insufficient funds. Student balance is %, but bill is %.', v_current_balance, p_total_amount;
+    END IF;
+
+    -- 2. Insert the new bill (settlement_id is left NULL initially)
+    -- The status is set to 'completed' as per the check constraint domain
+    INSERT INTO Bill (student_id, vendor_id, total_amount, date, status)
+    VALUES (p_student_id, p_vendor_id, p_total_amount, CURRENT_DATE, 'completed')
+    RETURNING bill_id INTO v_new_bill_id;
+
+    -- The trigger 'after_bill_insert' automatically fires here and deducts the balance.
+
+    RETURN v_new_bill_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Sample query to use the function:
+select issue_bill(1, 4, 150.50);
