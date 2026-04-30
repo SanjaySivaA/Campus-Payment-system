@@ -1,0 +1,1 @@
+- Navigating to `SpendingLimit` by joins during Bill generation is costly
