@@ -252,3 +252,23 @@ CREATE TRIGGER after_recharge_insert
 AFTER INSERT ON Recharge
 FOR EACH ROW
 EXECUTE FUNCTION process_student_recharge();
+
+-- T4.reduces remaining_amount in SpendingLimit after a purchase is made
+CREATE OR REPLACE FUNCTION deduct_spending_limit()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Deduct from the active spending limit for the current date
+    UPDATE SpendingLimit
+    SET remaining_amount = remaining_amount - NEW.total_amount
+    WHERE student_id = NEW.student_id
+      AND NEW.date BETWEEN start_date AND end_date;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Bind this to the Bill table, just like the balance deduction!
+CREATE TRIGGER trigger_update_spending_limit
+AFTER INSERT ON Bill
+FOR EACH ROW
+EXECUTE FUNCTION deduct_spending_limit();
