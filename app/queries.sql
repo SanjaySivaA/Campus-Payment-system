@@ -3,7 +3,7 @@
 --- we cannot index on 'virtual' columns of the result set returned by a function
 
 select *
-from get_statement(1)
+from get_statement(1)  -- this argument (student_id) is recieved from the request from the frontend
 where amount > 500;
 
 
@@ -14,3 +14,4 @@ from bill
 where amount > 100 and vendor id = 1;
 
 --- try more useful range based queries to introduce some btree indexes
+--- those indexes also can be added here

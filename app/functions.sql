@@ -56,7 +56,7 @@ EXECUTE FUNCTION update_bills_after_settlement();
 
 
 --- F2. function to get the purchase history of the student given his student_id
-create function get_statement(p_student_id INT)
+create or replace function get_statement(p_student_id INT)
 returns table (bill_id int, date date, vendor_id int, vendor_name varchar(50), amount numeric)
 as $$
 begin
@@ -74,7 +74,7 @@ select * from get_statement(1);
 --------------------------------------------------------------------------------------------------
 
 -- F3. function to compare the prices of a given item across different vendors
-create function compare_prices(p_item_id int)
+create or replace function compare_prices(p_item_id int)
 returns table (vendor_id int, vendor_name varchar(50), cost numeric, in_stock bool, last_updated timestamp without time zone)
 as $$
 begin
@@ -178,3 +178,33 @@ $$ LANGUAGE plpgsql;
 
 -- Sample query to use the function:
 select issue_bill(1, 4, 150.50);
+
+
+--- F6. Vendor needs to update the inventory
+CREATE OR REPLACE FUNCTION update_vendor_inventory(
+    p_vendor_id INT,
+    p_item_id INT,
+    p_new_cost NUMERIC(10,2),
+    p_in_stock BOOLEAN
+)
+RETURNS TEXT AS $$
+DECLARE
+    rows_affected INT;
+BEGIN
+    UPDATE inventory
+    SET 
+        cost = p_new_cost,
+        in_stock = p_in_stock,
+        last_update_time = CURRENT_TIMESTAMP
+    WHERE vendor_id = p_vendor_id 
+      AND item_id = p_item_id;
+
+    GET DIAGNOSTICS rows_affected = ROW_COUNT;
+
+    IF rows_affected = 0 THEN
+        RETURN 'Error: Item not found for this vendor.';
+    ELSE
+        RETURN 'Success: Inventory updated.';
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
