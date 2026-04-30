@@ -1,1 +1,2 @@
 - Navigating to `SpendingLimit` by joins during Bill generation is costly
+- the small size of the tables limits the use of indexes created. We can use `SET enable_seqscan = OFF;` to test indexes but remember to do `SET enable_seqscan = ON`
