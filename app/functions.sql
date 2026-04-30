@@ -1,4 +1,4 @@
--- 1. Requesting Settlement (Vendor) 
+-- F1. Requesting Settlement (Vendor) 
 
 CREATE OR REPLACE FUNCTION request_settlement(p_vendor_id VARCHAR)
 RETURNS INT AS $$
@@ -29,6 +29,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 
+-- T1 : 
 -- Associated trigger
 
 -- Step A: Define the logic that executes when the trigger fires
@@ -53,7 +54,8 @@ EXECUTE FUNCTION update_bills_after_settlement();
 
 -------------------------------------------------------------------------------------------------------
 
---- function to get the purchase history of the student given his student_id
+
+--- F2. function to get the purchase history of the student given his student_id
 create function get_statement(p_student_id INT)
 returns table (bill_id int, date date, vendor_id int, vendor_name varchar(50), amount numeric)
 as $$
@@ -71,7 +73,7 @@ select * from get_statement(1);
 
 --------------------------------------------------------------------------------------------------
 
--- function to compare the prices of a given item across different vendors
+-- F3. function to compare the prices of a given item across different vendors
 create function compare_prices(p_item_id int)
 returns table (vendor_id int, vendor_name varchar(50), cost numeric, in_stock bool, last_updated timestamp without time zone)
 as $$
@@ -89,7 +91,7 @@ select * from compare_prices(50);
 
 --------------------------------------------------------------------------------------------------
 
--- function to approve settlements
+-- F4. function to approve settlements
 CREATE OR REPLACE FUNCTION approve_settlement(p_settlement_id INT, p_admin_id INT)
 RETURNS VOID AS $$
 DECLARE
@@ -125,7 +127,7 @@ select approve_settlement(3, 1);
 
 --------------------------------------------------------------------------------------------------
 
--- function to update student's bank balance
+-- T2. function to update student's bank balance. 
 CREATE OR REPLACE FUNCTION trigger_update_student_balance()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -138,13 +140,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Bind the trigger to the Bill table
+-- Bind the trigger to the Bill table. This will follow F5
 CREATE TRIGGER after_bill_insert
 AFTER INSERT ON Bill
 FOR EACH ROW
 EXECUTE FUNCTION trigger_update_student_balance();
 
--- function to verify student has enough funds before insert
+-- F5. function to verify student has enough funds before insert and issue bill (insert into bill table)
 CREATE OR REPLACE FUNCTION issue_bill(p_student_id INT, p_vendor_id INT, p_total_amount NUMERIC)
 RETURNS INT AS $$
 DECLARE
