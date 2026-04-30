@@ -30,3 +30,8 @@ WHERE student_id = 3;
 
 --- try more useful range based queries to introduce some btree indexes
 --- those indexes also can be added here
+
+-- Update the tables to ensure they can hold the bcrypt hashes
+ALTER TABLE Student ALTER COLUMN password_hash TYPE VARCHAR(255);
+ALTER TABLE Vendor ALTER COLUMN password_hash TYPE VARCHAR(255);
+ALTER TABLE Admin ALTER COLUMN password_hash TYPE VARCHAR(255);
