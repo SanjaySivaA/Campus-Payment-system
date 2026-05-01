@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict SpONl84dabtJizbYzgslcd0hOlBUK7PefO14ljaDSHQnAeJ8BljgzpwnNapGozk
+\restrict Hrie2OXfwdx46Qi41uZecbkCEm5qt4Wr83eo9YMcN0d5FHxIjgU7K3f8EIjfxsh
 
 -- Dumped from database version 14.22 (Ubuntu 14.22-0ubuntu0.22.04.1)
 -- Dumped by pg_dump version 14.22 (Ubuntu 14.22-0ubuntu0.22.04.1)
@@ -152,6 +152,22 @@ CREATE TABLE public.item (
 ALTER TABLE public.item OWNER TO postgres;
 
 --
+-- Name: my_inventory; Type: VIEW; Schema: public; Owner: postgres
+--
+
+CREATE VIEW public.my_inventory AS
+ SELECT inventory.inventory_id,
+    inventory.item_id,
+    inventory.vendor_id,
+    inventory.cost,
+    inventory.in_stock,
+    inventory.last_update_time
+   FROM public.inventory;
+
+
+ALTER TABLE public.my_inventory OWNER TO postgres;
+
+--
 -- Name: recharge; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -195,7 +211,7 @@ CREATE TABLE public.student (
     email character varying(50),
     phone character varying(15),
     balance numeric(10,2) DEFAULT 0,
-    password_hash character varying(20),
+    password_hash character varying(255),
     spending_limit integer,
     CONSTRAINT student_balance_check CHECK ((balance >= (0)::numeric))
 );
@@ -969,5 +985,5 @@ ALTER TABLE ONLY public.vendor_account
 -- PostgreSQL database dump complete
 --
 
-\unrestrict SpONl84dabtJizbYzgslcd0hOlBUK7PefO14ljaDSHQnAeJ8BljgzpwnNapGozk
+\unrestrict Hrie2OXfwdx46Qi41uZecbkCEm5qt4Wr83eo9YMcN0d5FHxIjgU7K3f8EIjfxsh
 
