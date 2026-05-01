@@ -272,3 +272,25 @@ CREATE TRIGGER trigger_update_spending_limit
 AFTER INSERT ON Bill
 FOR EACH ROW
 EXECUTE FUNCTION deduct_spending_limit();
+
+
+
+--- f7. student wants to set her spendling limit
+
+CREATE OR REPLACE FUNCTION set_spending_limit(
+    p_student_id INT,
+    p_spending_limit INT
+)
+RETURNS VOID
+AS $$
+
+BEGIN
+    UPDATE student
+    SET spending_limit = p_spending_limit
+    WHERE student_id = p_student_id;
+END;
+
+$$ LANGUAGE plpgsql;
+
+-- a sample query
+set_spending_limit(1,500);
