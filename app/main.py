@@ -15,6 +15,7 @@
 # from fastapi import APIRouter, Depends, HTTPException
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 from datetime import timedelta
 
@@ -24,6 +25,20 @@ from .database import get_raw_db_conn
 # app = APIRouter()
 
 app = FastAPI(title="Campus Payment System API")
+
+origins = [
+    "http://localhost:3000", # Typical React/Next.js port
+    "http://localhost:5173", # Typical Vite/Vue port
+    "http://localhost:8080",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,       # Domains allowed to communicate with this API
+    allow_credentials=True,      # Allows cookies/authorization headers to be sent
+    allow_methods=["*"],         # Allows all HTTP methods (GET, POST, PUT, DELETE, etc.)
+    allow_headers=["*"],         # Allows all headers (Crucial for passing the JWT Bearer token)
+)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
