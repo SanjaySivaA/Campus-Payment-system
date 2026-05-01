@@ -257,17 +257,16 @@ EXECUTE FUNCTION process_student_recharge();
 CREATE OR REPLACE FUNCTION deduct_spending_limit()
 RETURNS TRIGGER AS $$
 BEGIN
-    -- Deduct from the active spending limit for the current date
-    UPDATE SpendingLimit
-    SET remaining_amount = remaining_amount - NEW.total_amount
-    WHERE student_id = NEW.student_id
-      AND NEW.date BETWEEN start_date AND end_date;
+    -- Deduct the bill amount directly from the student's spending_limit attribute
+    UPDATE Student
+    SET spending_limit = spending_limit - NEW.total_amount
+    WHERE student_id = NEW.student_id;
 
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
--- Bind this to the Bill table, just like the balance deduction!
+-- The trigger binding 
 CREATE TRIGGER trigger_update_spending_limit
 AFTER INSERT ON Bill
 FOR EACH ROW
