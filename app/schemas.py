@@ -38,7 +38,7 @@ class StudentCreate(BaseModel):
     # Password doesn't need a max_length here because it gets hashed to 60 chars anyway,
     # but you can add a min_length for security
     password: str = Field(..., min_length=4) 
-    weekly_spending_limit: Decimal
+    spending_limit: Decimal
 
 class VendorCreate(BaseModel):
     vendor_id: int
