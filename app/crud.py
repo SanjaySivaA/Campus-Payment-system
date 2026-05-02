@@ -86,3 +86,10 @@ def get_statement(conn, student_id: int):
         cur.execute("SELECT * FROM get_statement(%s);", (student_id,))
         rows = cur.fetchall()
     return rows
+
+
+def set_spending_limit(conn, student_id: int, spending_limit):
+    with conn.cursor() as cur:
+        cur.callproc("set_spending_limit", [student_id, spending_limit])
+    conn.commit()
+

@@ -64,6 +64,19 @@ def read_student_statement(student_id: int, conn = Depends(get_raw_db_conn)):
     # into the JSON format defined by the StatementItem schema.
     return statement_rows
 
+# to set spending limit
+@app.put("/students/{student_id}/spending-limit")
+def update_spending_limit(student_id: int, data: schemas.SpendingLimitUpdate, conn = Depends(get_raw_db_conn)):
+    try:
+        crud.set_spending_limit(conn, student_id, data.spending_limit)
+        return {
+            "student_id": student_id,
+            "spending_limit": data.spending_limit,
+            "message": "Spending limit updated successfully"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ----------------- Authentication endpoints begin --------------------------------------- #
 
 @app.post("/signup/student", status_code=status.HTTP_201_CREATED)
