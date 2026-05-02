@@ -42,10 +42,12 @@ app.add_middleware(
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
+# test endpoint 
 @app.get("/")
 def read_root():
     return {"message": "API is running"}
 
+# statements' endpoint
 @app.get("/students/{student_id}/statement", response_model=List[schemas.StatementItem])
 def read_student_statement(student_id: int, conn = Depends(get_raw_db_conn)):
     """
@@ -54,8 +56,9 @@ def read_student_statement(student_id: int, conn = Depends(get_raw_db_conn)):
     # Call the raw SQL function
     statement_rows = crud.get_statement(conn, student_id)
     
+    # return empty array if no bills/ invalid student_id (only valid student_id s are sent from frontend)
     if not statement_rows:
-        raise HTTPException(status_code=404, detail="No transactions found for this student.")
+        return []  
         
     # FastAPI and Pydantic will automatically parse the RealDictCursor output
     # into the JSON format defined by the StatementItem schema.

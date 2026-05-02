@@ -80,24 +80,9 @@ def create_vendor(conn, vendor: schemas.VendorCreate, hashed_password: str):
         conn.commit()
         return cur.fetchone()['vendor_id']
 
+
 def get_statement(conn, student_id: int):
-    # raw sql query
-    query = """
-        SELECT 
-            b.bill_id, 
-            b.date, 
-            v.vendor_id, 
-            v.name AS vendor_name, 
-            b.total_amount AS amount
-        FROM bill b
-        JOIN vendor v USING (vendor_id)
-        WHERE b.student_id = %s;
-    """
-    
-    # Execute the query and fetch the results
     with conn.cursor() as cur:
-        
-        cur.execute(query, (student_id,))
+        cur.execute("SELECT * FROM get_statement(%s);", (student_id,))
         rows = cur.fetchall()
-        
     return rows
