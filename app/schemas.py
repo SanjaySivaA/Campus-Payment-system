@@ -60,6 +60,19 @@ class StatementItem(BaseModel):
     class Config:
         from_attributes = True  
 
+
+class SpendingLimitUpdate(BaseModel):
+    student_id: int
+    spending_limit: Decimal
+    message: str
+
+class UnsettledRequest(BaseModel):
+    settlement_id: int
+    vendor_id: int
+    amount: Decimal
+    status: str
+    date: date
+
 # --- Base Schemas ---
 
 class StudentBase(BaseModel):

@@ -93,3 +93,9 @@ def set_spending_limit(conn, student_id: int, spending_limit):
         cur.callproc("set_spending_limit", [student_id, spending_limit])
     conn.commit()
 
+def get_unsettled_requests(conn):
+    with conn.cursor() as cur:
+        cur.execute("SELECT * FROM unsettled_requests;")
+        rows = cur.fetchall()
+    return rows
+

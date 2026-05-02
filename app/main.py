@@ -77,6 +77,15 @@ def update_spending_limit(student_id: int, data: schemas.SpendingLimitUpdate, co
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# endpoint to get unsettled requests view
+@app.get("/admin/unsettled-requests", response_model=List[schemas.UnsettledRequest])
+def read_unsettled_requests(conn = Depends(get_raw_db_conn)):
+    try:
+        rows = crud.get_unsettled_requests(conn)
+        return rows   
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ----------------- Authentication endpoints begin --------------------------------------- #
 
 @app.post("/signup/student", status_code=status.HTTP_201_CREATED)
