@@ -292,4 +292,4 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- a sample query
-set_spending_limit(1,500);
+select set_spending_limit(1,500);
