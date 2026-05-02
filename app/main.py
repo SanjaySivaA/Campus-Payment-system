@@ -86,6 +86,79 @@ def read_unsettled_requests(conn = Depends(get_raw_db_conn)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# ----------------- Student Dashboard Endpoints ----------------- #
+
+@app.get("/students/{student_id}")
+def read_student_profile(student_id: int, conn = Depends(get_raw_db_conn)):
+    student = crud.get_student_details(conn, student_id)
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    return student
+
+@app.post("/students/{student_id}/recharge")
+def recharge_wallet(student_id: int, req: schemas.RechargeRequest, conn = Depends(get_raw_db_conn)):
+    try:
+        recharge_id = crud.process_recharge(conn, student_id, req.amount)
+        return {"message": f"Successfully recharged ₹{req.amount}", "recharge_id": recharge_id}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/items/{item_id}/prices")
+def compare_item_prices(item_id: int, conn = Depends(get_raw_db_conn)):
+    try:
+        return crud.compare_prices(conn, item_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ----------------- Vendor Dashboard Endpoints ----------------- #
+
+@app.get("/vendors/{vendor_id}/sales")
+def read_vendor_sales(vendor_id: int, conn = Depends(get_raw_db_conn)):
+    try:
+        return crud.get_vendor_sales(conn, vendor_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/vendors/{vendor_id}/inventory/{item_id}")
+def update_vendor_inventory(vendor_id: int, item_id: int, req: schemas.InventoryUpdate, conn = Depends(get_raw_db_conn)):
+    try:
+        msg = crud.update_inventory(conn, vendor_id, item_id, req.cost, req.in_stock)
+        if "Error" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        return {"message": msg}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/vendors/{vendor_id}/settlements")
+def vendor_request_settlement(vendor_id: int, conn = Depends(get_raw_db_conn)):
+    try:
+        new_id = crud.request_settlement(conn, vendor_id)
+        return {"settlement_id": new_id, "message": "Settlement requested successfully"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+# ----------------- Admin Dashboard Endpoints ----------------- #
+
+@app.get("/admin/settlements", response_model=List[schemas.SettlementItem])
+def read_all_settlements(conn = Depends(get_raw_db_conn)):
+    try:
+        return crud.get_all_settlements(conn)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/settlements/{settlement_id}/approve")
+def admin_approve_settlement(settlement_id: int, admin_id: int, conn = Depends(get_raw_db_conn)):
+    # Note: Expects admin_id to be passed (e.g., as a query parameter or extracted from JWT token)
+    try:
+        crud.approve_settlement(conn, settlement_id, admin_id)
+        return {"message": f"Settlement {settlement_id} approved successfully"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
 # ----------------- Authentication endpoints begin --------------------------------------- #
 
 @app.post("/signup/student", status_code=status.HTTP_201_CREATED)

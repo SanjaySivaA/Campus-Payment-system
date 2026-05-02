@@ -99,3 +99,72 @@ def get_unsettled_requests(conn):
         rows = cur.fetchall()
     return rows
 
+def get_student_details(conn, student_id: int):
+    query = """
+        SELECT student_id, first_name, last_name, email, phone, balance, spending_limit 
+        FROM student 
+        WHERE student_id = %s;
+    """
+    with conn.cursor() as cur:
+        cur.execute(query, (student_id,))
+        return cur.fetchone()
+
+def process_recharge(conn, student_id: int, amount):
+    query = """
+        INSERT INTO Recharge (student_id, amount, date) 
+        VALUES (%s, %s, CURRENT_DATE) 
+        RETURNING recharge_id;
+    """
+    with conn.cursor() as cur:
+        cur.execute(query, (student_id, amount))
+        conn.commit()
+        return cur.fetchone()['recharge_id']
+
+def compare_prices(conn, item_id: int):
+    with conn.cursor() as cur:
+        cur.execute("SELECT * FROM compare_prices(%s);", (item_id,))
+        return cur.fetchall()
+
+def get_vendor_sales(conn, vendor_id: int):
+    query = """
+        SELECT bill_id, date, student_id, total_amount as amount, status 
+        FROM Bill 
+        WHERE vendor_id = %s 
+        ORDER BY date DESC;
+    """
+    with conn.cursor() as cur:
+        cur.execute(query, (vendor_id,))
+        return cur.fetchall()
+
+def update_inventory(conn, vendor_id: int, item_id: int, cost, in_stock: bool):
+    with conn.cursor() as cur:
+        cur.execute("SELECT update_vendor_inventory(%s, %s, %s, %s) as msg;", 
+                    (vendor_id, item_id, cost, in_stock))
+        conn.commit()
+        return cur.fetchone()['msg']
+
+def request_settlement(conn, vendor_id: int):
+    with conn.cursor() as cur:
+        # Your SQL function expects a VARCHAR for p_vendor_id
+        cur.execute("SELECT request_settlement(%s) as new_id;", (str(vendor_id),))
+        conn.commit()
+        return cur.fetchone()['new_id']
+
+def get_all_settlements(conn):
+    query = """
+        SELECT s.settlement_id, s.vendor_id, v.name as vendor_name, s.amount, s.date, s.status 
+        FROM Settlement s 
+        JOIN Vendor v ON s.vendor_id = v.vendor_id 
+        ORDER BY 
+            CASE WHEN s.status = 'PENDING' THEN 1 ELSE 2 END,
+            s.date DESC;
+    """
+    with conn.cursor() as cur:
+        cur.execute(query)
+        return cur.fetchall()
+
+def approve_settlement(conn, settlement_id: int, admin_id: int):
+    with conn.cursor() as cur:
+        cur.execute("SELECT approve_settlement(%s, %s);", (settlement_id, admin_id))
+        conn.commit()
+

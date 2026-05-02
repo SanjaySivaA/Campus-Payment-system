@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { mockSettlements, Settlement } from "@/lib/mock";
+import { api, auth, Settlement } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -17,10 +17,18 @@ const Wrap = ({ children }: { children: React.ReactNode }) => (
 );
 
 const Overview = () => {
-  const pending = mockSettlements.filter((s) => s.status === "PENDING");
-  const paid = mockSettlements.filter((s) => s.status === "paid");
-  const totalPending = pending.reduce((s, r) => s + r.amount, 0);
-  const totalPaid = paid.reduce((s, r) => s + r.amount, 0);
+  const [settlements, setSettlements] = useState<Settlement[]>([]);
+
+  useEffect(() => {
+    api.getAllSettlements()
+       .then(setSettlements)
+       .catch((e) => toast.error("Failed to load overview data: " + e.message));
+  }, []);
+
+  const pending = settlements.filter((s) => s.status === "PENDING");
+  const paid = settlements.filter((s) => s.status === "paid");
+  const totalPending = pending.reduce((sum, r) => sum + Number(r.amount), 0);
+  const totalPaid = paid.reduce((sum, r) => sum + Number(r.amount), 0);
 
   return (
     <Wrap>
@@ -37,14 +45,14 @@ const Overview = () => {
         </div>
         <div className="rounded-2xl border bg-card p-6 shadow-card">
           <CheckCircle2 className="h-6 w-6 mb-3 text-success" />
-          <p className="text-sm text-muted-foreground">Paid this month</p>
+          <p className="text-sm text-muted-foreground">Paid historically</p>
           <p className="text-4xl font-bold">₹{totalPaid.toLocaleString()}</p>
           <p className="text-xs text-muted-foreground mt-1">{paid.length} settlements</p>
         </div>
         <div className="rounded-2xl border bg-card p-6 shadow-card">
           <TrendingUp className="h-6 w-6 mb-3 text-accent" />
           <p className="text-sm text-muted-foreground">Active vendors</p>
-          <p className="text-4xl font-bold">{new Set(mockSettlements.map((s) => s.vendor_id)).size}</p>
+          <p className="text-4xl font-bold">{new Set(settlements.map((s) => s.vendor_id)).size}</p>
           <p className="text-xs text-muted-foreground mt-1">across campus</p>
         </div>
       </div>
@@ -57,17 +65,27 @@ const Overview = () => {
 };
 
 const Settlements = () => {
-  const [list, setList] = useState<Settlement[]>(mockSettlements);
+  const session = auth.get()!;
+  const [list, setList] = useState<Settlement[]>([]);
   const [busy, setBusy] = useState<number | null>(null);
 
-  const approve = (s: Settlement) => {
+  useEffect(() => {
+    api.getAllSettlements()
+       .then(setList)
+       .catch((e) => toast.error("Failed to load settlements: " + e.message));
+  }, []);
+
+  const approve = async (s: Settlement) => {
     setBusy(s.settlement_id);
-    // TODO: call approve_settlement(p_settlement_id, p_admin_id) via /admin/settlements/{id}/approve
-    setTimeout(() => {
+    try {
+      await api.approveSettlement(s.settlement_id, session.userId);
       setList((prev) => prev.map((x) => (x.settlement_id === s.settlement_id ? { ...x, status: "paid" } : x)));
       toast.success(`Settlement #${s.settlement_id} approved & paid to ${s.vendor_name}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Approval failed");
+    } finally {
       setBusy(null);
-    }, 1000);
+    }
   };
 
   const pending = list.filter((s) => s.status === "PENDING");
@@ -93,11 +111,11 @@ const Settlements = () => {
             <div className="flex items-start justify-between mb-4">
               <div>
                 <p className="font-bold text-lg">{s.vendor_name}</p>
-                <p className="text-xs text-muted-foreground">Settlement #{s.settlement_id} · {s.date}</p>
+                <p className="text-xs text-muted-foreground">Settlement #{s.settlement_id} · {new Date(s.date).toLocaleDateString()}</p>
               </div>
               <Badge className="bg-warning text-warning-foreground">Pending</Badge>
             </div>
-            <p className="text-3xl font-bold text-primary mb-4">₹{s.amount.toLocaleString()}</p>
+            <p className="text-3xl font-bold text-primary mb-4">₹{Number(s.amount).toLocaleString()}</p>
             <Button
               onClick={() => approve(s)}
               disabled={busy === s.settlement_id}
@@ -131,10 +149,15 @@ const Settlements = () => {
               <tr key={s.settlement_id} className="border-t hover:bg-muted/30">
                 <td className="p-4 font-mono text-xs">#{s.settlement_id}</td>
                 <td className="p-4 font-medium">{s.vendor_name}</td>
-                <td className="p-4">{s.date}</td>
-                <td className="p-4 text-right font-semibold">₹{s.amount.toLocaleString()}</td>
+                <td className="p-4">{new Date(s.date).toLocaleDateString()}</td>
+                <td className="p-4 text-right font-semibold">₹{Number(s.amount).toLocaleString()}</td>
               </tr>
             ))}
+            {paid.length === 0 && (
+              <tr>
+                <td colSpan={4} className="p-8 text-center text-muted-foreground">No historical payments.</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
