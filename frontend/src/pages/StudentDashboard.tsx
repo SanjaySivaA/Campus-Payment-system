@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { api, auth } from "@/lib/api";
-import { mockItems, mockPrices, PriceRow } from "@/lib/mock";
+import { api, auth, PriceRow } from "@/lib/api";
+import { mockItems } from "@/lib/mock";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Wallet, Receipt, BarChart3, Plus, ArrowUpRight, TrendingUp } from "lucide-react";
+import { Wallet, Receipt, BarChart3, Plus, ArrowUpRight, TrendingUp, Loader2 } from "lucide-react";
 
 const nav = [
   { to: "/student", label: "Overview" },
@@ -26,10 +26,17 @@ const Wrap = ({ children }: { children: React.ReactNode }) => (
 // --- Overview ---
 const Overview = () => {
   const session = auth.get()!;
-  // TODO: Replace mock balance with real /students/{id} endpoint when backend exposes it
-  const balance = 2480.5;
-  const limit = 1000;
-  const used = 320;
+  const [profile, setProfile] = useState<{ balance: number; spending_limit: number } | null>(null);
+
+  useEffect(() => {
+    api.getStudentProfile(session.userId)
+      .then(setProfile)
+      .catch((err) => toast.error("Failed to load profile: " + err.message));
+  }, [session.userId]);
+
+  const balance = profile?.balance ?? 0;
+  const remainingLimit = profile?.spending_limit ?? 0;
+
   return (
     <Wrap>
       <div className="grid lg:grid-cols-3 gap-6 mb-8">
@@ -48,22 +55,13 @@ const Overview = () => {
           </div>
         </div>
         <div className="rounded-2xl bg-card border p-6 shadow-card">
-          <p className="text-sm text-muted-foreground mb-1">Weekly limit</p>
-          <p className="text-3xl font-bold mb-3">₹{(limit - used).toLocaleString()}</p>
-          <p className="text-xs text-muted-foreground mb-2">remaining of ₹{limit}</p>
-          <div className="h-2 rounded-full bg-muted overflow-hidden">
-            <div className="h-full bg-gradient-primary" style={{ width: `${(used / limit) * 100}%` }} />
-          </div>
-          <div className="grid grid-cols-2 gap-2 mt-4 text-center">
-            <div className="p-3 rounded-xl bg-secondary">
-              <p className="text-xs text-muted-foreground">This week</p>
-              <p className="font-bold">₹{used}</p>
-            </div>
-            <div className="p-3 rounded-xl bg-muted">
-              <p className="text-xs text-muted-foreground">Avg/day</p>
-              <p className="font-bold">₹{Math.round(used / 7)}</p>
-            </div>
-          </div>
+          <p className="text-sm text-muted-foreground mb-1">Weekly limit remaining</p>
+          {profile === null ? (
+            <Skeleton className="h-10 w-24 mb-3" />
+          ) : (
+            <p className="text-3xl font-bold mb-3">₹{remainingLimit.toLocaleString()}</p>
+          )}
+          <p className="text-xs text-muted-foreground mb-2">resets soon</p>
         </div>
       </div>
 
@@ -123,7 +121,7 @@ const Statement = () => {
       {error && (
         <div className="rounded-xl border border-warning/40 bg-warning/10 p-4 mb-4 text-sm">
           <p className="font-medium text-warning-foreground">{error}</p>
-          <p className="text-muted-foreground mt-1">Make sure your FastAPI server is running on http://localhost:8000.</p>
+          <p className="text-muted-foreground mt-1">Make sure your FastAPI server is running.</p>
         </div>
       )}
 
@@ -165,13 +163,16 @@ const Compare = () => {
   const [rows, setRows] = useState<PriceRow[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const search = () => {
+  const search = async () => {
     setLoading(true);
-    // TODO: replace with /items/{id}/prices endpoint backed by compare_prices()
-    setTimeout(() => {
-      setRows(mockPrices(Number(itemId)).sort((a, b) => a.cost - b.cost));
+    try {
+      const data = await api.comparePrices(Number(itemId));
+      setRows(data.sort((a, b) => a.cost - b.cost));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to compare prices");
+    } finally {
       setLoading(false);
-    }, 400);
+    }
   };
 
   useEffect(() => { search(); /* initial */ // eslint-disable-next-line
@@ -200,7 +201,7 @@ const Compare = () => {
             </Select>
           </div>
           <Button onClick={search} disabled={loading} className="h-12 bg-gradient-primary text-primary-foreground border-0 shadow-soft">
-            Compare
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Compare"}
           </Button>
         </div>
       </div>
@@ -223,7 +224,7 @@ const Compare = () => {
             <div className="flex items-start justify-between mb-3">
               <div>
                 <p className="font-bold text-lg">{r.vendor_name}</p>
-                <p className="text-xs text-muted-foreground">Updated just now</p>
+                <p className="text-xs text-muted-foreground">Updated {new Date(r.last_updated).toLocaleDateString()}</p>
               </div>
               <Badge variant={r.in_stock ? "default" : "secondary"} className={r.in_stock ? "bg-success text-success-foreground" : "bg-muted text-muted-foreground"}>
                 {r.in_stock ? "In stock" : "Out of stock"}
@@ -239,13 +240,25 @@ const Compare = () => {
 
 // --- Recharge ---
 const Recharge = () => {
+  const session = auth.get()!;
   const [amount, setAmount] = useState("500");
+  const [loading, setLoading] = useState(false);
   const presets = [200, 500, 1000, 2000];
-  const submit = (e: React.FormEvent) => {
+
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // TODO: replace with /students/{id}/recharge endpoint that inserts into Recharge table
-    toast.success(`₹${amount} added to your wallet (mocked)`);
+    setLoading(true);
+    try {
+      await api.recharge(session.userId, Number(amount));
+      toast.success(`₹${amount} added to your wallet!`);
+      setAmount("0");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Recharge failed");
+    } finally {
+      setLoading(false);
+    }
   };
+
   return (
     <Wrap>
       <div className="mb-6">
@@ -265,8 +278,8 @@ const Recharge = () => {
               </button>
             ))}
           </div>
-          <Button type="submit" className="w-full h-12 bg-gradient-primary text-primary-foreground border-0 shadow-soft hover:shadow-glow transition-smooth">
-            Recharge ₹{amount || 0}
+          <Button type="submit" disabled={loading} className="w-full h-12 bg-gradient-primary text-primary-foreground border-0 shadow-soft hover:shadow-glow transition-smooth">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : `Recharge ₹${amount || 0}`}
           </Button>
         </form>
       </div>

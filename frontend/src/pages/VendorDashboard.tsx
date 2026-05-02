@@ -1,14 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { mockVendorSales, mockSettlements } from "@/lib/mock";
+import { api, auth, VendorSale, Settlement } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { auth } from "@/lib/api";
-import { TrendingUp, Receipt, Package, Wallet, ArrowUpRight } from "lucide-react";
+import { TrendingUp, Receipt, Package, Wallet, ArrowUpRight, Loader2 } from "lucide-react";
 
 const nav = [
   { to: "/vendor", label: "Overview" },
@@ -22,10 +21,19 @@ const Wrap = ({ children }: { children: React.ReactNode }) => (
 );
 
 const Overview = () => {
-  const sales = mockVendorSales();
-  const today = sales[0]?.amount ?? 0;
-  const week = sales.slice(0, 7).reduce((s, r) => s + r.amount, 0);
-  const pending = mockSettlements.filter((s) => s.status === "PENDING").reduce((s, r) => s + r.amount, 0);
+  const session = auth.get()!;
+  const [sales, setSales] = useState<VendorSale[]>([]);
+  const [pending, setPending] = useState(0);
+
+  useEffect(() => {
+    api.getVendorSales(session.userId).then(setSales).catch(console.error);
+    api.getAllSettlements()
+      .then((data) => setPending(data.filter(s => s.vendor_id === session.userId && s.status === "PENDING").reduce((sum, r) => sum + Number(r.amount), 0)))
+      .catch(console.error);
+  }, [session.userId]);
+
+  const today = sales.length > 0 ? sales[0].amount : 0;
+  const week = sales.slice(0, 7).reduce((sum, r) => sum + Number(r.amount), 0);
 
   const stats = [
     { label: "Today's revenue", value: `₹${today}`, icon: TrendingUp, grad: "bg-gradient-primary" },
@@ -72,8 +80,17 @@ const Overview = () => {
 };
 
 const Sales = () => {
-  const sales = mockVendorSales();
-  const total = sales.reduce((s, r) => s + r.amount, 0);
+  const session = auth.get()!;
+  const [sales, setSales] = useState<VendorSale[]>([]);
+
+  useEffect(() => {
+    api.getVendorSales(session.userId)
+      .then(setSales)
+      .catch((e) => toast.error("Failed to load sales: " + e.message));
+  }, [session.userId]);
+
+  const total = sales.reduce((s, r) => s + Number(r.amount), 0);
+
   return (
     <Wrap>
       <div className="flex items-center justify-between mb-6">
@@ -101,20 +118,24 @@ const Sales = () => {
             {sales.map((r) => (
               <tr key={r.bill_id} className="border-t hover:bg-muted/30 transition-smooth">
                 <td className="p-4 font-mono text-xs">#{r.bill_id}</td>
-                <td className="p-4">{r.date}</td>
+                <td className="p-4">{new Date(r.date).toLocaleDateString()}</td>
                 <td className="p-4">Student #{r.student_id}</td>
                 <td className="p-4">
                   <Badge className={r.status === "completed" ? "bg-success text-success-foreground" : "bg-muted text-muted-foreground"}>
                     {r.status}
                   </Badge>
                 </td>
-                <td className="p-4 text-right font-semibold">₹{r.amount}</td>
+                <td className="p-4 text-right font-semibold">₹{Number(r.amount).toLocaleString()}</td>
               </tr>
             ))}
+            {sales.length === 0 && (
+               <tr>
+                 <td colSpan={5} className="p-8 text-center text-muted-foreground">No sales recorded yet.</td>
+               </tr>
+            )}
           </tbody>
         </table>
       </div>
-      {/* TODO: wire to /vendors/{id}/sales endpoint */}
     </Wrap>
   );
 };
@@ -127,14 +148,26 @@ const initialInventory: InvRow[] = [
 ];
 
 const Inventory = () => {
+  const session = auth.get()!;
   const [items, setItems] = useState(initialInventory);
+  const [loadingMap, setLoadingMap] = useState<Record<number, boolean>>({});
+
   const update = (id: number, patch: Partial<InvRow>) => {
     setItems(items.map((i) => (i.item_id === id ? { ...i, ...patch } : i)));
   };
-  const save = (item: InvRow) => {
-    // TODO: call update_vendor_inventory via /vendors/{vid}/inventory/{iid}
-    toast.success(`Updated ${item.name}`);
+
+  const save = async (item: InvRow) => {
+    setLoadingMap(prev => ({ ...prev, [item.item_id]: true }));
+    try {
+      await api.updateInventory(session.userId, item.item_id, item.cost, item.in_stock);
+      toast.success(`Updated ${item.name}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update inventory");
+    } finally {
+      setLoadingMap(prev => ({ ...prev, [item.item_id]: false }));
+    }
   };
+
   return (
     <Wrap>
       <div className="mb-6">
@@ -171,8 +204,8 @@ const Inventory = () => {
                 </button>
               </div>
             </div>
-            <Button onClick={() => save(it)} className="w-full bg-gradient-accent text-accent-foreground border-0">
-              Save changes
+            <Button onClick={() => save(it)} disabled={loadingMap[it.item_id]} className="w-full bg-gradient-accent text-accent-foreground border-0">
+              {loadingMap[it.item_id] ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save changes"}
             </Button>
           </div>
         ))}
@@ -183,23 +216,33 @@ const Inventory = () => {
 
 const Settlements = () => {
   const session = auth.get()!;
-  const [list, setList] = useState(mockSettlements.filter((s) => s.vendor_id === session.userId).length
-    ? mockSettlements.filter((s) => s.vendor_id === session.userId)
-    : mockSettlements.slice(0, 3));
-  const pending = list.filter((s) => s.status === "PENDING").reduce((s, r) => s + r.amount, 0);
+  const [list, setList] = useState<Settlement[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const request = () => {
-    // TODO: call request_settlement(vendor_id) via /vendors/{id}/settlements
-    const newOne = {
-      settlement_id: Math.max(...list.map((l) => l.settlement_id)) + 1,
-      vendor_id: session.userId,
-      vendor_name: "Your shop",
-      amount: Math.round(1000 + Math.random() * 4000),
-      date: new Date().toISOString().slice(0, 10),
-      status: "PENDING" as const,
-    };
-    setList([newOne, ...list]);
-    toast.success(`Settlement #${newOne.settlement_id} requested`);
+  const fetchSettlements = () => {
+    api.getAllSettlements()
+       .then(data => setList(data.filter(s => s.vendor_id === session.userId)))
+       .catch(e => toast.error("Failed to load settlements: " + e.message));
+  };
+
+  useEffect(() => {
+    fetchSettlements();
+    // eslint-disable-next-line
+  }, [session.userId]);
+
+  const pending = list.filter((s) => s.status === "PENDING").reduce((sum, r) => sum + Number(r.amount), 0);
+
+  const request = async () => {
+    setLoading(true);
+    try {
+      await api.requestSettlement(session.userId);
+      toast.success(`Settlement requested successfully`);
+      fetchSettlements();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to request settlement");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -209,8 +252,8 @@ const Settlements = () => {
           <h1 className="text-3xl font-bold">Settlements</h1>
           <p className="text-muted-foreground">Request payouts for your unsettled bills</p>
         </div>
-        <Button onClick={request} className="h-12 bg-gradient-primary text-primary-foreground border-0 shadow-soft hover:shadow-glow transition-smooth">
-          Request settlement
+        <Button onClick={request} disabled={loading} className="h-12 bg-gradient-primary text-primary-foreground border-0 shadow-soft hover:shadow-glow transition-smooth">
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Request settlement"}
         </Button>
       </div>
 
@@ -233,15 +276,20 @@ const Settlements = () => {
             {list.map((s) => (
               <tr key={s.settlement_id} className="border-t hover:bg-muted/30">
                 <td className="p-4 font-mono text-xs">#{s.settlement_id}</td>
-                <td className="p-4">{s.date}</td>
+                <td className="p-4">{new Date(s.date).toLocaleDateString()}</td>
                 <td className="p-4">
                   <Badge className={s.status === "paid" ? "bg-success text-success-foreground" : "bg-warning text-warning-foreground"}>
                     {s.status}
                   </Badge>
                 </td>
-                <td className="p-4 text-right font-semibold">₹{s.amount.toLocaleString()}</td>
+                <td className="p-4 text-right font-semibold">₹{Number(s.amount).toLocaleString()}</td>
               </tr>
             ))}
+            {list.length === 0 && (
+               <tr>
+                 <td colSpan={4} className="p-8 text-center text-muted-foreground">No settlements requested yet.</td>
+               </tr>
+            )}
           </tbody>
         </table>
       </div>
