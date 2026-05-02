@@ -114,3 +114,19 @@ class BillResponse(BaseModel):
     total_amount: float
     vendor_name: str
     items: List[BillItemSchema]
+
+class RechargeRequest(BaseModel):
+    amount: Decimal
+
+class InventoryUpdate(BaseModel):
+    cost: Decimal
+    in_stock: bool
+
+# Optional response models for better documentation (FastAPI can also infer from dicts)
+class SettlementItem(BaseModel):
+    settlement_id: int
+    vendor_id: int
+    vendor_name: str
+    amount: Decimal
+    date: date
+    status: str
