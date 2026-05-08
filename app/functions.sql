@@ -1,6 +1,6 @@
 -- F1. Requesting Settlement (Vendor) 
 
-CREATE OR REPLACE FUNCTION request_settlement(p_vendor_id VARCHAR)
+CREATE OR REPLACE FUNCTION request_settlement(p_vendor_id INT)
 RETURNS INT AS $$
 DECLARE
     v_total_amount FLOAT;
@@ -18,15 +18,15 @@ BEGIN
 
     -- 3. Create the settlement record
     -- Note: admin_id is left NULL here since it hasn't been processed by an admin yet
-    INSERT INTO Settlement (vendor_id, status, amount, date)
-    VALUES (p_vendor_id, 'PENDING', v_total_amount, CURRENT_DATE)
+    INSERT INTO Settlement (vendor_id, admin_id,status, amount, date)
+    VALUES (p_vendor_id, 1,'requested', v_total_amount, CURRENT_DATE)
     RETURNING settlement_id INTO v_new_settlement_id;
 
     RETURN v_new_settlement_id;
     
     -- The trigger will automatically fire here to update the Bill table!
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 
 -- T1 : 
@@ -43,7 +43,7 @@ BEGIN
 
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Step B: Bind the function to the Settlement table
 CREATE TRIGGER trigger_settlement_insert
@@ -66,7 +66,7 @@ begin
 	join vendor v using (vendor_id)
 	where b.student_id = p_student_id;
 end;
-$$ language plpgsql;
+$$ language plpgsql SECURITY DEFINER;
 
 --- sample query using the above function
 select * from get_statement(1); 
@@ -84,7 +84,7 @@ begin
 	join vendor v using (vendor_id)
 	where i.item_id = p_item_id;
 end;
-$$ language plpgsql;
+$$ language plpgsql SECURITY DEFINER;
 
 -- sample query using the above function
 select * from compare_prices(50);
@@ -126,8 +126,7 @@ BEGIN
     WHERE settlement_id = p_settlement_id;
 
 END;
-$$ LANGUAGE plpgsql
-SECURITY DEFINER; -- Runs with privileges of the user who created it, but contains internal auth checks
+$$ LANGUAGE plpgsql SECURITY DEFINER; -- Runs with privileges of the user who created it, but contains internal auth checks
 
 -- Sample query to use the function:
 select approve_settlement(3, 1);
@@ -145,7 +144,7 @@ BEGIN
 
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Bind the trigger to the Bill table. This will follow F5
 CREATE TRIGGER after_bill_insert
@@ -196,7 +195,7 @@ BEGIN
 
     RETURN v_new_bill_id;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 
 
@@ -204,7 +203,37 @@ $$ LANGUAGE plpgsql;
 select issue_bill(1, 4, 150.50);
 
 
---- F6. Vendor needs to update the inventory
+-- --- F6. Vendor needs to update the inventory
+-- CREATE OR REPLACE FUNCTION update_vendor_inventory(
+--     p_vendor_id INT,
+--     p_item_id INT,
+--     p_new_cost NUMERIC(10,2),
+--     p_in_stock BOOLEAN
+-- )
+-- RETURNS TEXT AS $$
+-- DECLARE
+--     rows_affected INT;
+-- BEGIN
+--     UPDATE inventory
+--     SET 
+--         cost = p_new_cost,
+--         in_stock = p_in_stock,
+--         last_update_time = CURRENT_TIMESTAMP
+--     WHERE vendor_id = p_vendor_id 
+--       AND item_id = p_item_id;
+
+--     --error handling
+--     GET DIAGNOSTICS rows_affected = ROW_COUNT;
+
+--     IF rows_affected = 0 THEN
+--         RETURN 'Error: Item not found for this vendor.';
+--     ELSE
+--         RETURN 'Success: Inventory updated.';
+--     END IF;
+-- END;
+-- $$ LANGUAGE plpgsql;
+
+--- F6. Vendor needs to update the inventory or add a new item
 CREATE OR REPLACE FUNCTION update_vendor_inventory(
     p_vendor_id INT,
     p_item_id INT,
@@ -215,6 +244,7 @@ RETURNS TEXT AS $$
 DECLARE
     rows_affected INT;
 BEGIN
+    -- 1. Try to update the existing inventory row
     UPDATE inventory
     SET 
         cost = p_new_cost,
@@ -223,16 +253,20 @@ BEGIN
     WHERE vendor_id = p_vendor_id 
       AND item_id = p_item_id;
 
-    --error handling
+    -- 2. Check if the update actually modified any rows
     GET DIAGNOSTICS rows_affected = ROW_COUNT;
 
+    -- 3. If no rows were updated, it means the item isn't in their inventory yet
     IF rows_affected = 0 THEN
-        RETURN 'Error: Item not found for this vendor.';
+        INSERT INTO inventory (vendor_id, item_id, cost, in_stock, last_update_time)
+        VALUES (p_vendor_id, p_item_id, p_new_cost, p_in_stock, CURRENT_TIMESTAMP);
+        
+        RETURN 'Success: New item added to inventory.';
     ELSE
         RETURN 'Success: Inventory updated.';
     END IF;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 
 -- T3.the student's balance updates automatically when recharge is made 
@@ -246,7 +280,7 @@ BEGIN
 
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE TRIGGER after_recharge_insert
 AFTER INSERT ON Recharge
@@ -264,7 +298,7 @@ BEGIN
 
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- The trigger binding 
 CREATE TRIGGER trigger_update_spending_limit
@@ -289,7 +323,7 @@ BEGIN
     WHERE student_id = p_student_id;
 END;
 
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- a sample query
 select set_spending_limit(1,500);

@@ -146,7 +146,7 @@ def update_inventory(conn, vendor_id: int, item_id: int, cost, in_stock: bool):
 def request_settlement(conn, vendor_id: int):
     with conn.cursor() as cur:
         # Your SQL function expects a VARCHAR for p_vendor_id
-        cur.execute("SELECT request_settlement(%s) as new_id;", (str(vendor_id),))
+        cur.execute("SELECT request_settlement(%s) as new_id;", (vendor_id,))
         conn.commit()
         return cur.fetchone()['new_id']
 

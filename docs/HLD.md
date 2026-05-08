@@ -39,6 +39,8 @@ Limit function access to specific role(s)
     - TRIGGER on Bill table to update `settlement_id`
 - Issue Bill              : VENDOR
     - Update `balance` of student
+
+The above five functions are implemented in [functions.sql](../app/functions.sql)
     
 
 ### Queries (5)

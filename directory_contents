@@ -1,0 +1,1405 @@
+==> ./.env <==
+# Keep this for public routes (login/signup)
+DB_URL="postgresql://postgres:postgres123@localhost/campus_payment"
+
+# Add these for the role-based authenticated routes
+# (Make sure the passwords match what you set in PostgreSQL)
+STUDENT_DB_URL="postgresql://student_api:student_password_123@localhost/campus_payment"
+VENDOR_DB_URL="postgresql://vendor_api:vendor_password_123@localhost/campus_payment"
+ADMIN_DB_URL="postgresql://admin_api:admin_password_123@localhost/campus_payment"
+
+SECRET_KEY="09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
+ALGORITHM="HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES="30"
+==> ./auth.py <==
+# import os
+# import bcrypt
+# from dotenv import load_dotenv
+# from datetime import datetime, timedelta
+# from jose import JWTError, jwt
+
+# load_dotenv()
+
+# SECRET_KEY = os.getenv("SECRET_KEY")
+# ALGORITHM = os.getenv("ALGORITHM", "HS256")
+# ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
+
+# def verify_password(plain_password: str, hashed_password: str) -> bool:
+#     # bcrypt requires bytes, so we encode the strings
+#     password_byte_enc = plain_password.encode('utf-8')
+#     hashed_password_bytes = hashed_password.encode('utf-8')
+#     return bcrypt.checkpw(password_byte_enc, hashed_password_bytes)
+
+# def get_password_hash(password: str) -> str:
+#     pwd_bytes = password.encode('utf-8')
+#     salt = bcrypt.gensalt()
+#     hashed_password = bcrypt.hashpw(pwd_bytes, salt)
+#     return hashed_password.decode('utf-8')
+
+# def create_access_token(data: dict, expires_delta: timedelta | None = None):
+#     to_encode = data.copy()
+#     if expires_delta:
+#         expire = datetime.utcnow() + expires_delta
+#     else:
+#         expire = datetime.utcnow() + timedelta(minutes=15)
+        
+#     to_encode.update({"exp": expire})
+#     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+#     return encoded_jwt
+
+
+import os
+import bcrypt
+from dotenv import load_dotenv
+from datetime import datetime, timedelta
+from jose import JWTError, jwt
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+
+load_dotenv()
+
+SECRET_KEY = os.getenv("SECRET_KEY", "fallback_secret")
+ALGORITHM = os.getenv("ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
+
+# This tells FastAPI to look for the token in the Authorization header
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    password_byte_enc = plain_password.encode('utf-8')
+    hashed_password_bytes = hashed_password.encode('utf-8')
+    return bcrypt.checkpw(password_byte_enc, hashed_password_bytes)
+
+def get_password_hash(password: str) -> str:
+    pwd_bytes = password.encode('utf-8')
+    salt = bcrypt.gensalt()
+    hashed_password = bcrypt.hashpw(pwd_bytes, salt)
+    return hashed_password.decode('utf-8')
+
+def create_access_token(data: dict, expires_delta: timedelta | None = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+        
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+
+def get_current_role(token: str = Depends(oauth2_scheme)) -> str:
+    """Decodes the JWT to find out if the user is a student, vendor, or admin."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        role: str = payload.get("role")
+        if role is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Role missing in token"
+            )
+        return role
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+==> ./Concerns_and_knownbugs.md <==
+- Navigating to `SpendingLimit` by joins during Bill generation is costly
+- the small size of the tables limits the use of indexes created. We can use `SET enable_seqscan = OFF;` to test indexes but remember to do `SET enable_seqscan = ON`
+- Can `issue_bill` function itself update student balance and weekly balance without any trigger if those checks are passed ?
+
+- `request_settlements` - varchar or int for  `p_vendor_id`
+- `update_bills_after_settlement` triggered by `request_settlement`automatically gives a valid `settlement_id` to the bills without an admin approval (before `approve_settlement`) 
+
+==> ./crud.py <==
+# from sqlalchemy.orm import Session
+# from sqlalchemy import text
+
+# def execute_as_role(db: Session, role_name: str, query_string: str, params: dict):
+#     """
+#     Executes a query under a specific PostgreSQL role, reverting back 
+#     to the default app user immediately after the transaction.
+#     """
+#     try:
+#         # SET LOCAL only applies to the current transaction. 
+#         # It automatically reverts when the transaction is committed or rolled back.
+#         db.execute(text(f"SET LOCAL ROLE {role_name}"))
+        
+#         result = db.execute(text(query_string), params)
+#         db.commit()
+#         return result
+#     except Exception as e:
+#         db.rollback()
+#         raise e
+
+# def get_student(db: Session, student_id: str):
+#     """
+#     Fetches a student by their ID using a raw parameterized SQL query.
+#     """
+#     query = text("""
+#         SELECT student_id, name, email, balance 
+#         FROM student 
+#         WHERE student_id = :student_id
+#     """)
+    
+#     result = db.execute(query, {"student_id": student_id}).mappings().first()
+    
+#     return result
+
+# def vendor_request_settlement(db: Session, vendor_id: str):
+#     query = "SELECT request_settlement(:vendor_id) AS new_id"
+#     # Execute as the 'vendor' role
+#     result = execute_as_role(db, "vendor_role", query, {"vendor_id": vendor_id})
+#     return result.mappings().first()
+
+from . import schemas
+
+def get_user_auth(conn, user_id: int, role: str):
+    """
+    Fetches the user's password hash based on their role.
+    String formatting is safe here because `role` is strictly validated by Pydantic's Enum.
+    """
+    id_col = f"{role}_id"
+    query = f"SELECT {id_col} AS id, password_hash FROM {role} WHERE {id_col} = %s"
+    
+    with conn.cursor() as cur:
+        cur.execute(query, (user_id,))
+        return cur.fetchone()
+
+def create_student(conn, student: schemas.StudentCreate, hashed_password: str):
+    query = """
+        INSERT INTO student (student_id, first_name, last_name, email, phone, balance, password_hash, spending_limit)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING student_id;
+    """
+    with conn.cursor() as cur:
+        cur.execute(query, (
+            student.student_id, student.first_name, student.last_name,
+            student.email, student.phone, 0.0, hashed_password, student.spending_limit
+        ))
+        conn.commit()
+        return cur.fetchone()['student_id']
+
+def create_vendor(conn, vendor: schemas.VendorCreate, hashed_password: str):
+    query = """
+        INSERT INTO vendor (vendor_id, name, email, phone, password_hash)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING vendor_id;
+    """
+    with conn.cursor() as cur:
+        cur.execute(query, (
+            vendor.vendor_id, vendor.name,
+            vendor.email, vendor.phone, hashed_password
+        ))
+        conn.commit()
+        return cur.fetchone()['vendor_id']
+
+
+def get_statement(conn, student_id: int):
+    with conn.cursor() as cur:
+        cur.execute("SELECT * FROM get_statement(%s);", (student_id,))
+        rows = cur.fetchall()
+    return rows
+
+
+def set_spending_limit(conn, student_id: int, spending_limit):
+    with conn.cursor() as cur:
+        cur.callproc("set_spending_limit", [student_id, spending_limit])
+    conn.commit()
+
+def get_unsettled_requests(conn):
+    with conn.cursor() as cur:
+        cur.execute("SELECT * FROM unsettled_requests;")
+        rows = cur.fetchall()
+    return rows
+
+def get_student_details(conn, student_id: int):
+    query = """
+        SELECT student_id, first_name, last_name, email, phone, balance, spending_limit 
+        FROM student 
+        WHERE student_id = %s;
+    """
+    with conn.cursor() as cur:
+        cur.execute(query, (student_id,))
+        return cur.fetchone()
+
+def process_recharge(conn, student_id: int, amount):
+    query = """
+        INSERT INTO Recharge (student_id, amount, date) 
+        VALUES (%s, %s, CURRENT_DATE) 
+        RETURNING recharge_id;
+    """
+    with conn.cursor() as cur:
+        cur.execute(query, (student_id, amount))
+        conn.commit()
+        return cur.fetchone()['recharge_id']
+
+def compare_prices(conn, item_id: int):
+    with conn.cursor() as cur:
+        cur.execute("SELECT * FROM compare_prices(%s);", (item_id,))
+        return cur.fetchall()
+
+def get_vendor_sales(conn, vendor_id: int):
+    query = """
+        SELECT bill_id, date, student_id, total_amount as amount, status 
+        FROM Bill 
+        WHERE vendor_id = %s 
+        ORDER BY date DESC;
+    """
+    with conn.cursor() as cur:
+        cur.execute(query, (vendor_id,))
+        return cur.fetchall()
+
+def update_inventory(conn, vendor_id: int, item_id: int, cost, in_stock: bool):
+    with conn.cursor() as cur:
+        cur.execute("SELECT update_vendor_inventory(%s, %s, %s, %s) as msg;", 
+                    (vendor_id, item_id, cost, in_stock))
+        conn.commit()
+        return cur.fetchone()['msg']
+
+def request_settlement(conn, vendor_id: int):
+    with conn.cursor() as cur:
+        # Your SQL function expects a VARCHAR for p_vendor_id
+        cur.execute("SELECT request_settlement(%s) as new_id;", (vendor_id,))
+        conn.commit()
+        return cur.fetchone()['new_id']
+
+def get_all_settlements(conn):
+    query = """
+        SELECT s.settlement_id, s.vendor_id, v.name as vendor_name, s.amount, s.date, s.status 
+        FROM Settlement s 
+        JOIN Vendor v ON s.vendor_id = v.vendor_id 
+        ORDER BY 
+            CASE WHEN s.status = 'PENDING' THEN 1 ELSE 2 END,
+            s.date DESC;
+    """
+    with conn.cursor() as cur:
+        cur.execute(query)
+        return cur.fetchall()
+
+def approve_settlement(conn, settlement_id: int, admin_id: int):
+    with conn.cursor() as cur:
+        cur.execute("SELECT approve_settlement(%s, %s);", (settlement_id, admin_id))
+        conn.commit()
+
+
+==> ./database.py <==
+# # from sqlalchemy import create_engine
+# # from sqlalchemy.ext.declarative import declarative_base
+# # from sqlalchemy.orm import sessionmaker
+
+# # # Replace with your actual credentials from the project report
+# # SQLALCHEMY_DATABASE_URL = "postgresql://user:password@localhost/campus_payment"
+
+# # engine = create_engine(SQLALCHEMY_DATABASE_URL)
+# # SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# # Base = declarative_base()
+
+# # def get_db():
+# #     db = SessionLocal()
+# #     try:
+# #         yield db
+# #     finally:
+# #         db.close()
+
+# import psycopg2
+# import dotenv
+# import os
+# from psycopg2.extras import RealDictCursor
+# from dotenv import load_dotenv
+
+
+# load_dotenv()
+
+# # use actual db credentials in .env
+# DB_URL = os.getenv("DB_URL")
+
+# def get_raw_db_conn():
+#     """Yields a raw PostgreSQL connection that returns rows as dictionaries."""
+#     conn = psycopg2.connect(DB_URL, cursor_factory=RealDictCursor)
+#     try:
+#         yield conn
+#         print('db connected')
+#     finally:
+#         print('db closed')
+#         conn.close()
+
+import psycopg2
+import os
+from psycopg2.extras import RealDictCursor
+from dotenv import load_dotenv
+from fastapi import Depends, HTTPException
+from .auth import get_current_role
+
+load_dotenv()
+
+# Base DB URL for public endpoints (login, signup)
+DB_URL = os.getenv("DB_URL")
+
+# Role-specific URLs for protected endpoints
+STUDENT_DB_URL = os.getenv("STUDENT_DB_URL")
+VENDOR_DB_URL = os.getenv("VENDOR_DB_URL")
+ADMIN_DB_URL = os.getenv("ADMIN_DB_URL")
+
+def get_raw_db_conn():
+    """Used strictly for public endpoints like login and signup."""
+    conn = psycopg2.connect(DB_URL, cursor_factory=RealDictCursor)
+    try:
+        yield conn
+        print('Raw DB connected')
+    finally:
+        print('Raw DB closed')
+        conn.close()
+
+
+def get_role_db_conn(role: str = Depends(get_current_role)):
+    """Yields a DB connection dynamically based on the JWT token's role."""
+    if role == "student":
+        db_url = STUDENT_DB_URL
+    elif role == "vendor":
+        db_url = VENDOR_DB_URL
+    elif role == "admin":
+        db_url = ADMIN_DB_URL
+    else:
+        raise HTTPException(status_code=403, detail="Invalid user role")
+
+    if not db_url:
+        raise HTTPException(status_code=500, detail=f"Database URL for {role} is missing in .env")
+
+    conn = psycopg2.connect(db_url, cursor_factory=RealDictCursor)
+    try:
+        yield conn
+        print(f'Role DB connected as: {role}')
+    finally:
+        print(f'Role DB closed: {role}')
+        conn.close()
+==> ./functions.sql <==
+-- F1. Requesting Settlement (Vendor) 
+
+CREATE OR REPLACE FUNCTION request_settlement(p_vendor_id INT)
+RETURNS INT AS $$
+DECLARE
+    v_total_amount FLOAT;
+    v_new_settlement_id INT;
+BEGIN
+    -- 1. Calculate the total of all unsettled bills for this vendor
+    SELECT COALESCE(SUM(total_amount), 0) INTO v_total_amount
+    FROM Bill
+    WHERE vendor_id = p_vendor_id AND settlement_id IS NULL;
+
+    -- 2. Guard clause: Prevent empty settlements
+    IF v_total_amount = 0 THEN
+        RAISE EXCEPTION 'No unsettled bills found for this vendor.';
+    END IF;
+
+    -- 3. Create the settlement record
+    -- Note: admin_id is left NULL here since it hasn't been processed by an admin yet
+    INSERT INTO Settlement (vendor_id, admin_id,status, amount, date)
+    VALUES (p_vendor_id, 1,'requested', v_total_amount, CURRENT_DATE)
+    RETURNING settlement_id INTO v_new_settlement_id;
+
+    RETURN v_new_settlement_id;
+    
+    -- The trigger will automatically fire here to update the Bill table!
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
+-- T1 : 
+-- Associated trigger
+
+-- Step A: Define the logic that executes when the trigger fires
+CREATE OR REPLACE FUNCTION update_bills_after_settlement()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- NEW is a special record containing the newly inserted row's data
+    UPDATE Bill
+    SET settlement_id = NEW.settlement_id
+    WHERE vendor_id = NEW.vendor_id AND settlement_id IS NULL;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Step B: Bind the function to the Settlement table
+CREATE TRIGGER trigger_settlement_insert
+AFTER INSERT ON Settlement
+FOR EACH ROW
+EXECUTE FUNCTION update_bills_after_settlement();
+
+
+-------------------------------------------------------------------------------------------------------
+
+
+--- F2. function to get the purchase history of the student given his student_id
+create or replace function get_statement(p_student_id INT)
+returns table (bill_id int, date date, vendor_id int, vendor_name varchar(50), amount numeric)
+as $$
+begin
+	return query
+	select b.bill_id , b.date, v.vendor_id, v.name as vendor_name, b.total_amount
+	from bill b
+	join vendor v using (vendor_id)
+	where b.student_id = p_student_id;
+end;
+$$ language plpgsql SECURITY DEFINER;
+
+--- sample query using the above function
+select * from get_statement(1); 
+
+--------------------------------------------------------------------------------------------------
+
+-- F3. function to compare the prices of a given item across different vendors
+create or replace function compare_prices(p_item_id int)
+returns table (vendor_id int, vendor_name varchar(50), cost numeric, in_stock bool, last_updated timestamp without time zone)
+as $$
+begin
+	return query
+	select i.vendor_id, v.name as vendor_name, i.cost, i.in_stock bool, i.last_update_time
+	from inventory i
+	join vendor v using (vendor_id)
+	where i.item_id = p_item_id;
+end;
+$$ language plpgsql SECURITY DEFINER;
+
+-- sample query using the above function
+select * from compare_prices(50);
+
+--------------------------------------------------------------------------------------------------
+
+-- F4. function to approve settlements
+CREATE OR REPLACE FUNCTION approve_settlement(p_settlement_id INT, p_admin_id INT)
+RETURNS VOID AS $$
+DECLARE
+    v_current_status VARCHAR;
+BEGIN
+    -- Authorization Check: Ensure the database user is the admin_role
+    -- Alternatively, you can verify if the provided p_admin_id exists in the Admin table
+    IF NOT EXISTS (SELECT 1 FROM Admin WHERE admin_id = p_admin_id) THEN
+        RAISE EXCEPTION 'Unauthorized: Invalid Admin ID (%).', p_admin_id;
+    END IF;
+
+    -- 1. Check if the settlement exists and get its current status
+    SELECT status INTO v_current_status 
+    FROM Settlement 
+    WHERE settlement_id = p_settlement_id;
+
+    IF v_current_status IS NULL THEN
+        RAISE EXCEPTION 'Settlement ID % does not exist.', p_settlement_id;
+    ELSIF v_current_status = 'paid' THEN
+        RAISE EXCEPTION 'Settlement ID % has already been paid.', p_settlement_id;
+    END IF;
+
+    -- 2. Dummy API Call to Bank
+    RAISE NOTICE 'Initiating transfer for Settlement ID %...', p_settlement_id;
+    PERFORM pg_sleep(1.5); -- Simulates network delay for the bank API
+    RAISE NOTICE 'Bank transfer successful.';
+
+    -- 3. Update the settlement status and assign the admin
+    UPDATE Settlement
+    SET status = 'paid',
+        admin_id = p_admin_id
+    WHERE settlement_id = p_settlement_id;
+
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER; -- Runs with privileges of the user who created it, but contains internal auth checks
+
+-- Sample query to use the function:
+select approve_settlement(3, 1);
+
+--------------------------------------------------------------------------------------------------
+
+-- T2. function to update student's bank balance. 
+CREATE OR REPLACE FUNCTION trigger_update_student_balance()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Deduct the bill's total amount from the student's balance
+    UPDATE Student
+    SET balance = balance - NEW.total_amount
+    WHERE student_id = NEW.student_id;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Bind the trigger to the Bill table. This will follow F5
+CREATE TRIGGER after_bill_insert
+AFTER INSERT ON Bill
+FOR EACH ROW
+EXECUTE FUNCTION trigger_update_student_balance();
+
+-- F5. function to verify student has enough funds before insert and issue bill (insert into bill table)
+CREATE OR REPLACE FUNCTION issue_bill(p_student_id INT, p_vendor_id INT, p_total_amount NUMERIC)
+RETURNS INT AS $$
+DECLARE
+    v_current_balance NUMERIC;
+    v_spending_limit NUMERIC;
+    v_new_bill_id INT;
+BEGIN
+    -- Authorization Check: Ensure a valid vendor is issuing this
+    IF NOT EXISTS (SELECT 1 FROM Vendor WHERE vendor_id = p_vendor_id) THEN
+         RAISE EXCEPTION 'Unauthorized: Invalid Vendor ID (%).', p_vendor_id;
+    END IF;
+
+    -- 1. Get the student's balance and spending limit
+    -- Assuming spending_limit was added via: ALTER TABLE Student ADD COLUMN spending_limit NUMERIC DEFAULT 5000.00;
+    SELECT balance, spending_limit INTO v_current_balance, v_spending_limit
+    FROM Student 
+    WHERE student_id = p_student_id;
+
+    IF v_current_balance IS NULL THEN
+        RAISE EXCEPTION 'Student ID % not found.', p_student_id;
+    END IF;
+
+    -- 2. Apply the Business Rules
+    -- Rule A: Check Spending Limit
+    IF p_total_amount > v_spending_limit THEN
+         RAISE EXCEPTION 'Transaction Denied: Bill amount (%) exceeds the student''s spending limit (%).', p_total_amount, v_spending_limit;
+    END IF;
+
+    -- Rule B: Check Actual Balance
+    IF v_current_balance < p_total_amount THEN
+        RAISE EXCEPTION 'Insufficient funds. Student balance is %, but bill is %.', v_current_balance, p_total_amount;
+    END IF;
+
+    -- 3. Insert the new bill 
+    INSERT INTO Bill (student_id, vendor_id, total_amount, date, status)
+    VALUES (p_student_id, p_vendor_id, p_total_amount, CURRENT_DATE, 'completed')
+    RETURNING bill_id INTO v_new_bill_id;
+
+    -- (The trigger we wrote earlier 'after_bill_insert' will automatically deduct the balance here)
+
+    RETURN v_new_bill_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
+
+-- Sample query to use the function:
+select issue_bill(1, 4, 150.50);
+
+
+-- --- F6. Vendor needs to update the inventory
+-- CREATE OR REPLACE FUNCTION update_vendor_inventory(
+--     p_vendor_id INT,
+--     p_item_id INT,
+--     p_new_cost NUMERIC(10,2),
+--     p_in_stock BOOLEAN
+-- )
+-- RETURNS TEXT AS $$
+-- DECLARE
+--     rows_affected INT;
+-- BEGIN
+--     UPDATE inventory
+--     SET 
+--         cost = p_new_cost,
+--         in_stock = p_in_stock,
+--         last_update_time = CURRENT_TIMESTAMP
+--     WHERE vendor_id = p_vendor_id 
+--       AND item_id = p_item_id;
+
+--     --error handling
+--     GET DIAGNOSTICS rows_affected = ROW_COUNT;
+
+--     IF rows_affected = 0 THEN
+--         RETURN 'Error: Item not found for this vendor.';
+--     ELSE
+--         RETURN 'Success: Inventory updated.';
+--     END IF;
+-- END;
+-- $$ LANGUAGE plpgsql;
+
+--- F6. Vendor needs to update the inventory or add a new item
+CREATE OR REPLACE FUNCTION update_vendor_inventory(
+    p_vendor_id INT,
+    p_item_id INT,
+    p_new_cost NUMERIC(10,2),
+    p_in_stock BOOLEAN
+)
+RETURNS TEXT AS $$
+DECLARE
+    rows_affected INT;
+BEGIN
+    -- 1. Try to update the existing inventory row
+    UPDATE inventory
+    SET 
+        cost = p_new_cost,
+        in_stock = p_in_stock,
+        last_update_time = CURRENT_TIMESTAMP
+    WHERE vendor_id = p_vendor_id 
+      AND item_id = p_item_id;
+
+    -- 2. Check if the update actually modified any rows
+    GET DIAGNOSTICS rows_affected = ROW_COUNT;
+
+    -- 3. If no rows were updated, it means the item isn't in their inventory yet
+    IF rows_affected = 0 THEN
+        INSERT INTO inventory (vendor_id, item_id, cost, in_stock, last_update_time)
+        VALUES (p_vendor_id, p_item_id, p_new_cost, p_in_stock, CURRENT_TIMESTAMP);
+        
+        RETURN 'Success: New item added to inventory.';
+    ELSE
+        RETURN 'Success: Inventory updated.';
+    END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
+-- T3.the student's balance updates automatically when recharge is made 
+CREATE OR REPLACE FUNCTION process_student_recharge()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Add the recharge amount to the student's active balance
+    UPDATE Student
+    SET balance = balance + NEW.amount
+    WHERE student_id = NEW.student_id;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER after_recharge_insert
+AFTER INSERT ON Recharge
+FOR EACH ROW
+EXECUTE FUNCTION process_student_recharge();
+
+-- T4.reduces remaining_amount in SpendingLimit after a purchase is made
+CREATE OR REPLACE FUNCTION deduct_spending_limit()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Deduct the bill amount directly from the student's spending_limit attribute
+    UPDATE Student
+    SET spending_limit = spending_limit - NEW.total_amount
+    WHERE student_id = NEW.student_id;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- The trigger binding 
+CREATE TRIGGER trigger_update_spending_limit
+AFTER INSERT ON Bill
+FOR EACH ROW
+EXECUTE FUNCTION deduct_spending_limit();
+
+
+
+--- f7. student wants to set her spendling limit
+
+CREATE OR REPLACE FUNCTION set_spending_limit(
+    p_student_id INT,
+    p_spending_limit INT
+)
+RETURNS VOID
+AS $$
+
+BEGIN
+    UPDATE student
+    SET spending_limit = p_spending_limit
+    WHERE student_id = p_student_id;
+END;
+
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- a sample query
+select set_spending_limit(1,500);
+
+==> ./main.py <==
+# # from fastapi import FastAPI, Depends, HTTPException
+# # from sqlalchemy.orm import Session
+# # from . import schemas, crud
+# # from .database import engine, get_db
+
+# # app = FastAPI(title="Campus Payment System API")
+
+# # @app.get("/students/{student_id}", response_model=schemas.StudentResponse)
+# # def read_student(student_id: str, db: Session = Depends(get_db)):
+# #     db_student = crud.get_student(db, student_id=student_id)
+# #     if db_student is None:
+# #         raise HTTPException(status_code=404, detail="Student not found")
+# #     return db_student
+
+# # from fastapi import APIRouter, Depends, HTTPException
+# from fastapi import FastAPI, Depends, HTTPException, status
+# from fastapi.security import OAuth2PasswordBearer
+# from fastapi.middleware.cors import CORSMiddleware
+# from typing import List
+# from datetime import timedelta
+
+# from . import crud, schemas, auth
+# from .database import get_raw_db_conn
+
+# # app = APIRouter()
+
+# app = FastAPI(title="Campus Payment System API")
+
+# origins = [
+#     "http://localhost:3000", # Typical React/Next.js port
+#     "http://localhost:5173", # Typical Vite/Vue port
+#     "http://localhost:8080",
+# ]
+
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=origins,       # Domains allowed to communicate with this API
+#     allow_credentials=True,      # Allows cookies/authorization headers to be sent
+#     allow_methods=["*"],         # Allows all HTTP methods (GET, POST, PUT, DELETE, etc.)
+#     allow_headers=["*"],         # Allows all headers (Crucial for passing the JWT Bearer token)
+# )
+
+# oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+# # test endpoint 
+# @app.get("/")
+# def read_root():
+#     return {"message": "API is running"}
+
+# # statements' endpoint
+# @app.get("/students/{student_id}/statement", response_model=List[schemas.StatementItem])
+# def read_student_statement(student_id: int, conn = Depends(get_raw_db_conn)):
+#     """
+#     Retrieves the statement using raw SQL via Psycopg2.
+#     """
+#     # Call the raw SQL function
+#     statement_rows = crud.get_statement(conn, student_id)
+    
+#     # return empty array if no bills/ invalid student_id (only valid student_id s are sent from frontend)
+#     if not statement_rows:
+#         return []  
+        
+#     # FastAPI and Pydantic will automatically parse the RealDictCursor output
+#     # into the JSON format defined by the StatementItem schema.
+#     return statement_rows
+
+# # to set spending limit
+# @app.put("/students/{student_id}/spending-limit")
+# def update_spending_limit(student_id: int, data: schemas.SpendingLimitUpdate, conn = Depends(get_raw_db_conn)):
+#     try:
+#         crud.set_spending_limit(conn, student_id, data.spending_limit)
+#         return {
+#             "student_id": student_id,
+#             "spending_limit": data.spending_limit,
+#             "message": "Spending limit updated successfully"
+#         }
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+# # endpoint to get unsettled requests view
+# @app.get("/admin/unsettled-requests", response_model=List[schemas.UnsettledRequest])
+# def read_unsettled_requests(conn = Depends(get_raw_db_conn)):
+#     try:
+#         rows = crud.get_unsettled_requests(conn)
+#         return rows   
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+# # ----------------- Student Dashboard Endpoints ----------------- #
+
+# @app.get("/students/{student_id}")
+# def read_student_profile(student_id: int, conn = Depends(get_raw_db_conn)):
+#     student = crud.get_student_details(conn, student_id)
+#     if not student:
+#         raise HTTPException(status_code=404, detail="Student not found")
+#     return student
+
+# @app.post("/students/{student_id}/recharge")
+# def recharge_wallet(student_id: int, req: schemas.RechargeRequest, conn = Depends(get_raw_db_conn)):
+#     try:
+#         recharge_id = crud.process_recharge(conn, student_id, req.amount)
+#         return {"message": f"Successfully recharged ₹{req.amount}", "recharge_id": recharge_id}
+#     except Exception as e:
+#         conn.rollback()
+#         raise HTTPException(status_code=400, detail=str(e))
+
+# @app.get("/items/{item_id}/prices")
+# def compare_item_prices(item_id: int, conn = Depends(get_raw_db_conn)):
+#     try:
+#         return crud.compare_prices(conn, item_id)
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+# # ----------------- Vendor Dashboard Endpoints ----------------- #
+
+# @app.get("/vendors/{vendor_id}/sales")
+# def read_vendor_sales(vendor_id: int, conn = Depends(get_raw_db_conn)):
+#     try:
+#         return crud.get_vendor_sales(conn, vendor_id)
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+# @app.put("/vendors/{vendor_id}/inventory/{item_id}")
+# def update_vendor_inventory(vendor_id: int, item_id: int, req: schemas.InventoryUpdate, conn = Depends(get_raw_db_conn)):
+#     try:
+#         msg = crud.update_inventory(conn, vendor_id, item_id, req.cost, req.in_stock)
+#         if "Error" in msg:
+#             raise HTTPException(status_code=404, detail=msg)
+#         return {"message": msg}
+#     except Exception as e:
+#         conn.rollback()
+#         raise HTTPException(status_code=400, detail=str(e))
+
+# @app.post("/vendors/{vendor_id}/settlements")
+# def vendor_request_settlement(vendor_id: int, conn = Depends(get_raw_db_conn)):
+#     try:
+#         new_id = crud.request_settlement(conn, vendor_id)
+#         return {"settlement_id": new_id, "message": "Settlement requested successfully"}
+#     except Exception as e:
+#         conn.rollback()
+#         raise HTTPException(status_code=400, detail=str(e))
+
+# # ----------------- Admin Dashboard Endpoints ----------------- #
+
+# @app.get("/admin/settlements", response_model=List[schemas.SettlementItem])
+# def read_all_settlements(conn = Depends(get_raw_db_conn)):
+#     try:
+#         return crud.get_all_settlements(conn)
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+# @app.post("/admin/settlements/{settlement_id}/approve")
+# def admin_approve_settlement(settlement_id: int, admin_id: int, conn = Depends(get_raw_db_conn)):
+#     # Note: Expects admin_id to be passed (e.g., as a query parameter or extracted from JWT token)
+#     try:
+#         crud.approve_settlement(conn, settlement_id, admin_id)
+#         return {"message": f"Settlement {settlement_id} approved successfully"}
+#     except Exception as e:
+#         conn.rollback()
+#         raise HTTPException(status_code=400, detail=str(e))
+
+# # ----------------- Authentication endpoints begin --------------------------------------- #
+
+# @app.post("/signup/student", status_code=status.HTTP_201_CREATED)
+# def signup_student(student: schemas.StudentCreate, conn = Depends(get_raw_db_conn)):
+#     print(f"DEBUG: Password string received: '{student.password}'")
+#     print(f"DEBUG: Password length: {len(student.password)}")
+#     hashed_pw = auth.get_password_hash(student.password)
+#     try:
+#         student_id = crud.create_student(conn, student, hashed_pw)
+#         return {"message": "Student account created successfully", "student_id": student_id}
+#     except Exception as e:
+#         conn.rollback()
+#         raise HTTPException(status_code=400, detail=str(e))
+
+# @app.post("/signup/vendor", status_code=status.HTTP_201_CREATED)
+# def signup_vendor(vendor: schemas.VendorCreate, conn = Depends(get_raw_db_conn)):
+#     hashed_pw = auth.get_password_hash(vendor.password)
+#     try:
+#         vendor_id = crud.create_vendor(conn, vendor, hashed_pw)
+#         return {"message": "Vendor account created successfully", "vendor_id": vendor_id}
+#     except Exception as e:
+#         conn.rollback()
+#         raise HTTPException(status_code=400, detail=str(e))
+
+# @app.post("/login", response_model=schemas.Token)
+# def login(req: schemas.LoginRequest, conn = Depends(get_raw_db_conn)):
+#     # Look up the user in the correct table based on their role
+#     user = crud.get_user_auth(conn, user_id=req.user_id, role=req.role.value)
+    
+#     # Verify existence and password
+#     if not user or not auth.verify_password(req.password, user['password_hash']):
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED,
+#             detail="Incorrect ID or password",
+#             headers={"WWW-Authenticate": "Bearer"},
+#         )
+        
+#     access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+#     # Embed the role directly in the JWT token payload
+#     access_token = auth.create_access_token(
+#         data={"sub": str(user['id']), "role": req.role.value}, 
+#         expires_delta=access_token_expires
+#     )
+    
+#     return {"access_token": access_token, "token_type": "bearer"}
+
+# # ----------------- Authentication endpoints end --------------------------------------- #
+
+
+
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from typing import List
+from datetime import timedelta
+
+from . import crud, schemas, auth
+# Import BOTH connection functions
+from .database import get_raw_db_conn, get_role_db_conn
+
+app = FastAPI(title="Campus Payment System API")
+
+origins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8080",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# test endpoint 
+@app.get("/")
+def read_root():
+    return {"message": "API is running"}
+
+# statements' endpoint
+# PROTECTED: Uses get_role_db_conn
+@app.get("/students/{student_id}/statement", response_model=List[schemas.StatementItem])
+def read_student_statement(student_id: int, conn = Depends(get_role_db_conn)):
+    statement_rows = crud.get_statement(conn, student_id)
+    if not statement_rows:
+        return []  
+    return statement_rows
+
+# to set spending limit
+# PROTECTED: Uses get_role_db_conn
+@app.put("/students/{student_id}/spending-limit")
+def update_spending_limit(student_id: int, data: schemas.SpendingLimitUpdate, conn = Depends(get_role_db_conn)):
+    try:
+        crud.set_spending_limit(conn, student_id, data.spending_limit)
+        return {
+            "student_id": student_id,
+            "spending_limit": data.spending_limit,
+            "message": "Spending limit updated successfully"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# endpoint to get unsettled requests view
+# PROTECTED: Uses get_role_db_conn
+@app.get("/admin/unsettled-requests", response_model=List[schemas.UnsettledRequest])
+def read_unsettled_requests(conn = Depends(get_role_db_conn)):
+    try:
+        rows = crud.get_unsettled_requests(conn)
+        return rows   
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ----------------- Student Dashboard Endpoints ----------------- #
+
+# PROTECTED: Uses get_role_db_conn
+@app.get("/students/{student_id}")
+def read_student_profile(student_id: int, conn = Depends(get_role_db_conn)):
+    student = crud.get_student_details(conn, student_id)
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    return student
+
+# PROTECTED: Uses get_role_db_conn
+@app.post("/students/{student_id}/recharge")
+def recharge_wallet(student_id: int, req: schemas.RechargeRequest, conn = Depends(get_role_db_conn)):
+    try:
+        recharge_id = crud.process_recharge(conn, student_id, req.amount)
+        return {"message": f"Successfully recharged ₹{req.amount}", "recharge_id": recharge_id}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+# PROTECTED: Uses get_role_db_conn
+@app.get("/items/{item_id}/prices")
+def compare_item_prices(item_id: int, conn = Depends(get_role_db_conn)):
+    try:
+        return crud.compare_prices(conn, item_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ----------------- Vendor Dashboard Endpoints ----------------- #
+
+# PROTECTED: Uses get_role_db_conn
+@app.get("/vendors/{vendor_id}/sales")
+def read_vendor_sales(vendor_id: int, conn = Depends(get_role_db_conn)):
+    try:
+        return crud.get_vendor_sales(conn, vendor_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# PROTECTED: Uses get_role_db_conn
+@app.put("/vendors/{vendor_id}/inventory/{item_id}")
+def update_vendor_inventory(vendor_id: int, item_id: int, req: schemas.InventoryUpdate, conn = Depends(get_role_db_conn)):
+    try:
+        msg = crud.update_inventory(conn, vendor_id, item_id, req.cost, req.in_stock)
+        if "Error" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        return {"message": msg}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+# PROTECTED: Uses get_role_db_conn
+@app.post("/vendors/{vendor_id}/settlements")
+def vendor_request_settlement(vendor_id: int, conn = Depends(get_role_db_conn)):
+    try:
+        new_id = crud.request_settlement(conn, vendor_id)
+        return {"settlement_id": new_id, "message": "Settlement requested successfully"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+# ----------------- Admin Dashboard Endpoints ----------------- #
+
+# PROTECTED: Uses get_role_db_conn
+@app.get("/admin/settlements", response_model=List[schemas.SettlementItem])
+def read_all_settlements(conn = Depends(get_role_db_conn)):
+    try:
+        return crud.get_all_settlements(conn)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# PROTECTED: Uses get_role_db_conn
+@app.post("/admin/settlements/{settlement_id}/approve")
+def admin_approve_settlement(settlement_id: int, admin_id: int, conn = Depends(get_role_db_conn)):
+    try:
+        crud.approve_settlement(conn, settlement_id, admin_id)
+        return {"message": f"Settlement {settlement_id} approved successfully"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+# ----------------- Authentication endpoints begin --------------------------------------- #
+
+# PUBLIC: Uses get_raw_db_conn
+@app.post("/signup/student", status_code=status.HTTP_201_CREATED)
+def signup_student(student: schemas.StudentCreate, conn = Depends(get_raw_db_conn)):
+    hashed_pw = auth.get_password_hash(student.password)
+    try:
+        student_id = crud.create_student(conn, student, hashed_pw)
+        return {"message": "Student account created successfully", "student_id": student_id}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+# PUBLIC: Uses get_raw_db_conn
+@app.post("/signup/vendor", status_code=status.HTTP_201_CREATED)
+def signup_vendor(vendor: schemas.VendorCreate, conn = Depends(get_raw_db_conn)):
+    hashed_pw = auth.get_password_hash(vendor.password)
+    try:
+        vendor_id = crud.create_vendor(conn, vendor, hashed_pw)
+        return {"message": "Vendor account created successfully", "vendor_id": vendor_id}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+# PUBLIC: Uses get_raw_db_conn
+@app.post("/login", response_model=schemas.Token)
+def login(req: schemas.LoginRequest, conn = Depends(get_raw_db_conn)):
+    user = crud.get_user_auth(conn, user_id=req.user_id, role=req.role.value)
+    
+    if not user or not auth.verify_password(req.password, user['password_hash']):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect ID or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        
+    access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+    access_token = auth.create_access_token(
+        data={"sub": str(user['id']), "role": req.role.value}, 
+        expires_delta=access_token_expires
+    )
+    
+    return {"access_token": access_token, "token_type": "bearer"}
+==> ./queries.sql <==
+--- this query helps the student to get all her purchases above 500 rupees
+--- this query makes use of the relation returned by the get_statement function
+--- we cannot index on 'virtual' columns of the result set returned by a function
+
+select *
+from get_statement(1)  -- this argument (student_id) is recieved from the request from the frontend
+where amount > 500;
+
+
+--- vendor uses this query to filter bills issued by her
+
+select * 
+from bill
+where amount > 100 and vendor id = 1;
+
+-- some useful indexes
+CREATE INDEX idx_bill_student_id ON bill USING btree (student_id);
+create index idx_bill_total_amount on bill using btree(total_amount);
+
+
+-- force the planner to use an index
+-- SET enable_seqscan = OFF; 
+
+EXPLAIN ANALYZE
+SELECT * FROM student
+WHERE student_id = 3;
+
+-- enable seq. scan
+-- SET enable_seqscan = ON;
+
+--- try more useful range based queries to introduce some btree indexes
+--- those indexes also can be added here
+
+-- Update the tables to ensure they can hold the bcrypt hashes
+ALTER TABLE Student ALTER COLUMN password_hash TYPE VARCHAR(255);
+ALTER TABLE Vendor ALTER COLUMN password_hash TYPE VARCHAR(255);
+ALTER TABLE Admin ALTER COLUMN password_hash TYPE VARCHAR(255);
+
+-- query done by vendor to update inventory
+SELECT update_vendor_inventory(2, 101, 750.00, TRUE);
+
+
+==> ./requirements.txt <==
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+pydantic
+pydantic-settings
+python-multipart
+python-jose[cryptography]
+==> ./roles_privileges.sql <==
+--------------------RBAC-------------------------------------
+
+-- groups
+CREATE ROLE student_role NOLOGIN;
+CREATE ROLE vendor_role NOLOGIN;
+CREATE ROLE admin_role NOLOGIN;
+
+-- Grant access to the default 'public' schema for all roles
+GRANT USAGE ON SCHEMA public TO student_role, vendor_role, admin_role;
+
+
+-- Table Permissions
+GRANT SELECT ON Student,Vendor, Inventory TO student_role;
+GRANT SELECT, UPDATE(spending_limit) ON Student TO student_role;
+GRANT INSERT, SELECT ON Bill, Recharge TO student_role;
+
+-- If Bill and Recharge use SERIAL primary keys, they need access to the sequences to auto-increment the IDs!
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO student_role;
+
+-- Function Permissions
+GRANT EXECUTE ON FUNCTION get_statement(INT) TO student_role;
+GRANT EXECUTE ON FUNCTION compare_prices(INT) TO student_role;
+GRANT EXECUTE ON FUNCTION set_spending_limit(INT, INT) TO student_role;
+
+
+---------------VENDOR-------------------------------------
+-- Table Permissions
+GRANT SELECT ON Student, Bill,Vendor TO vendor_role;
+GRANT SELECT, UPDATE,INSERT ON Inventory TO vendor_role;
+GRANT INSERT, SELECT ON Settlement TO vendor_role;
+
+-- Sequence permissions for generating new settlements
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO vendor_role;
+
+-- Function Permissions
+GRANT EXECUTE ON FUNCTION request_settlement(VARCHAR) TO vendor_role;
+GRANT EXECUTE ON FUNCTION update_vendor_inventory(INT, INT, NUMERIC, BOOLEAN) TO vendor_role;
+GRANT EXECUTE ON FUNCTION issue_bill(INT, INT, NUMERIC) TO vendor_role;
+
+
+
+-- Table Permissions (Admins get broad access to manage the system)
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO admin_role;
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO admin_role;
+
+-- Function Permissions
+GRANT EXECUTE ON FUNCTION approve_settlement(INT, INT) TO admin_role;
+
+
+
+-- ==========================================
+-- PROXY API USERS
+-- ==========================================
+
+-- 1. Create the backend login accounts with passwords
+CREATE USER student_api WITH PASSWORD 'student_password_123';
+CREATE USER vendor_api WITH PASSWORD 'vendor_password_123';
+CREATE USER admin_api WITH PASSWORD 'admin_password_123';
+
+-- 2. Hand them the "badges" (assign the group roles to the proxy users)
+GRANT student_role TO student_api;
+GRANT vendor_role TO vendor_api;
+GRANT admin_role TO admin_api;
+==> ./schemas.py <==
+from pydantic import BaseModel, EmailStr, Field
+from datetime import datetime
+from typing import List, Optional
+from enum import Enum
+
+# from pydantic import BaseModel
+from datetime import date
+from decimal import Decimal
+
+class RoleEnum(str, Enum):
+    student = "student"
+    vendor = "vendor"
+    admin = "admin"
+
+# --------------------------- Authentication Schemas ------------------------------ #
+
+class LoginRequest(BaseModel):
+    user_id: int
+    password: str
+    role: RoleEnum
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    user_id: Optional[int] = None
+    role: Optional[str] = None
+
+class StudentCreate(BaseModel):
+    student_id: int
+    # Enforce max lengths to match your PostgreSQL column limits
+    first_name: str = Field(..., max_length=20)
+    last_name: str = Field(..., max_length=20)
+    email: EmailStr
+    phone: str = Field(..., max_length=15)
+    
+    # Password doesn't need a max_length here because it gets hashed to 60 chars anyway,
+    # but you can add a min_length for security
+    password: str = Field(..., min_length=4) 
+    # spending_limit: Decimal
+    spending_limit: Decimal = Field(alias="weekly_spending_limit")
+
+class VendorCreate(BaseModel):
+    vendor_id: int
+    name: str = Field(..., max_length=100)
+    email: EmailStr = Field(..., max_length=255)
+    phone: str = Field(..., max_length=15)
+    password: str = Field(..., min_length=4)
+# --------------------------------------------------------------------------------- #
+
+# add other schemas
+
+class StatementItem(BaseModel):
+    bill_id: int
+    date: date
+    vendor_id: int
+    vendor_name: str
+    amount: Decimal
+
+    class Config:
+        from_attributes = True  
+
+
+class SpendingLimitUpdate(BaseModel):
+    student_id: int
+    spending_limit: Decimal
+    message: str
+
+class UnsettledRequest(BaseModel):
+    settlement_id: int
+    vendor_id: int
+    amount: Decimal
+    status: str
+    date: date
+
+# --- Base Schemas ---
+
+class StudentBase(BaseModel):
+    student_id: str
+    name: str
+    email: EmailStr
+
+class StudentResponse(StudentBase):
+    balance: float
+
+# --- Feature 1: Price Comparison ---
+
+class PriceComparisonRequest(BaseModel):
+    item_id: int
+
+class VendorPrice(BaseModel):
+    vendor_name: str
+    price: float
+
+class PriceComparisonResponse(BaseModel):
+    item_id: int
+    prices: List[VendorPrice]
+
+# --- Feature 2: Purchase History ---
+
+class HistoryRequest(BaseModel):
+    student_id: str
+    start_date: datetime
+    end_date: datetime
+
+class BillItemSchema(BaseModel):
+    item_name: str
+    quantity: int
+    price_at_purchase: float
+
+class BillResponse(BaseModel):
+    bill_id: int
+    date_time: datetime
+    total_amount: float
+    vendor_name: str
+    items: List[BillItemSchema]
+
+class RechargeRequest(BaseModel):
+    amount: Decimal
+
+class InventoryUpdate(BaseModel):
+    cost: Decimal
+    in_stock: bool
+
+# Optional response models for better documentation (FastAPI can also infer from dicts)
+class SettlementItem(BaseModel):
+    settlement_id: int
+    vendor_id: int
+    vendor_name: str
+    amount: Decimal
+    date: date
+    status: str
+==> ./views.sql <==
+--- this view is for the admin to see all requests which are not yet settled
+create or replace view unsettled_requests as
+select *
+from settlement
+where status = 'requested';
+
+--- sample query to use the above view
+select * from unsettled_requests;
+
+
+--- view for any role to see the inventory
+create or replace view my_inventory as 
+select * 
+from inventory;
+
+select * from my_inventory;
+
+--- students know how much they have left to spend
+create or replace view active_student_limits as
+select 
+    student_id,
+    first_name || ' ' || last_name as student_name,
+    balance as current_wallet_balance,
+    spending_limit as remaining_spending_limit
+from student;
+
+select * from active_student_limits where student_id = 1;
+
+
+--- aggregates bills of the vendor for the current date
+create or replace view vendor_daily_sales as
+select 
+    v.vendor_id,
+    v.name as shop_name,
+    count(b.bill_id) as total_transactions_today,
+    coalesce(sum(b.total_amount), 0) as daily_revenue
+from vendor v
+left join bill b 
+    on v.vendor_id = b.vendor_id 
+    and b.date = current_date
+    and b.status = 'completed'
+group by v.vendor_id, v.name;
+
+select * from vendor_daily_sales where vendor_id = 4;

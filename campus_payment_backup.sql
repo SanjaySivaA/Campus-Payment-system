@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict Hrie2OXfwdx46Qi41uZecbkCEm5qt4Wr83eo9YMcN0d5FHxIjgU7K3f8EIjfxsh
+\restrict yBxExnzcmBRTejlzOOLleZT3uZtuIi6nd1H2pU3d3ttPA14ycJxKwVFg5EhSCMR
 
 -- Dumped from database version 14.22 (Ubuntu 14.22-0ubuntu0.22.04.1)
 -- Dumped by pg_dump version 14.22 (Ubuntu 14.22-0ubuntu0.22.04.1)
@@ -19,11 +19,55 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
+-- Name: approve_settlement(integer, integer); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.approve_settlement(p_settlement_id integer, p_admin_id integer) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    AS $$
+DECLARE
+    v_current_status VARCHAR;
+BEGIN
+    -- Authorization Check: Ensure the database user is the admin_role
+    -- Alternatively, you can verify if the provided p_admin_id exists in the Admin table
+    IF NOT EXISTS (SELECT 1 FROM Admin WHERE admin_id = p_admin_id) THEN
+        RAISE EXCEPTION 'Unauthorized: Invalid Admin ID (%).', p_admin_id;
+    END IF;
+
+    -- 1. Check if the settlement exists and get its current status
+    SELECT status INTO v_current_status 
+    FROM Settlement 
+    WHERE settlement_id = p_settlement_id;
+
+    IF v_current_status IS NULL THEN
+        RAISE EXCEPTION 'Settlement ID % does not exist.', p_settlement_id;
+    ELSIF v_current_status = 'paid' THEN
+        RAISE EXCEPTION 'Settlement ID % has already been paid.', p_settlement_id;
+    END IF;
+
+    -- 2. Dummy API Call to Bank
+    RAISE NOTICE 'Initiating transfer for Settlement ID %...', p_settlement_id;
+    PERFORM pg_sleep(1.5); -- Simulates network delay for the bank API
+    RAISE NOTICE 'Bank transfer successful.';
+
+    -- 3. Update the settlement status and assign the admin
+    UPDATE Settlement
+    SET status = 'paid',
+        admin_id = p_admin_id
+    WHERE settlement_id = p_settlement_id;
+
+END;
+$$;
+
+
+ALTER FUNCTION public.approve_settlement(p_settlement_id integer, p_admin_id integer) OWNER TO postgres;
+
+--
 -- Name: compare_prices(integer); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
 CREATE FUNCTION public.compare_prices(p_item_id integer) RETURNS TABLE(vendor_id integer, vendor_name character varying, cost numeric, in_stock boolean, last_updated timestamp without time zone)
-    LANGUAGE plpgsql
+    LANGUAGE plpgsql SECURITY DEFINER
     AS $$
 begin
 	return query
@@ -38,11 +82,31 @@ $$;
 ALTER FUNCTION public.compare_prices(p_item_id integer) OWNER TO postgres;
 
 --
+-- Name: deduct_spending_limit(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.deduct_spending_limit() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    AS $$
+BEGIN
+    -- Deduct the bill amount directly from the student's spending_limit attribute
+    UPDATE Student
+    SET spending_limit = spending_limit - NEW.total_amount
+    WHERE student_id = NEW.student_id;
+
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.deduct_spending_limit() OWNER TO postgres;
+
+--
 -- Name: get_statement(integer); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
 CREATE FUNCTION public.get_statement(p_student_id integer) RETURNS TABLE(bill_id integer, date date, vendor_id integer, vendor_name character varying, amount numeric)
-    LANGUAGE plpgsql
+    LANGUAGE plpgsql SECURITY DEFINER
     AS $$
 begin
 	return query
@@ -56,9 +120,282 @@ $$;
 
 ALTER FUNCTION public.get_statement(p_student_id integer) OWNER TO postgres;
 
+--
+-- Name: issue_bill(integer, integer, numeric); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.issue_bill(p_student_id integer, p_vendor_id integer, p_total_amount numeric) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    AS $$
+DECLARE
+    v_current_balance NUMERIC;
+    v_spending_limit NUMERIC;
+    v_new_bill_id INT;
+BEGIN
+    -- Authorization Check: Ensure a valid vendor is issuing this
+    IF NOT EXISTS (SELECT 1 FROM Vendor WHERE vendor_id = p_vendor_id) THEN
+         RAISE EXCEPTION 'Unauthorized: Invalid Vendor ID (%).', p_vendor_id;
+    END IF;
+
+    -- 1. Get the student's balance and spending limit
+    -- Assuming spending_limit was added via: ALTER TABLE Student ADD COLUMN spending_limit NUMERIC DEFAULT 5000.00;
+    SELECT balance, spending_limit INTO v_current_balance, v_spending_limit
+    FROM Student 
+    WHERE student_id = p_student_id;
+
+    IF v_current_balance IS NULL THEN
+        RAISE EXCEPTION 'Student ID % not found.', p_student_id;
+    END IF;
+
+    -- 2. Apply the Business Rules
+    -- Rule A: Check Spending Limit
+    IF p_total_amount > v_spending_limit THEN
+         RAISE EXCEPTION 'Transaction Denied: Bill amount (%) exceeds the student''s spending limit (%).', p_total_amount, v_spending_limit;
+    END IF;
+
+    -- Rule B: Check Actual Balance
+    IF v_current_balance < p_total_amount THEN
+        RAISE EXCEPTION 'Insufficient funds. Student balance is %, but bill is %.', v_current_balance, p_total_amount;
+    END IF;
+
+    -- 3. Insert the new bill 
+    INSERT INTO Bill (student_id, vendor_id, total_amount, date, status)
+    VALUES (p_student_id, p_vendor_id, p_total_amount, CURRENT_DATE, 'completed')
+    RETURNING bill_id INTO v_new_bill_id;
+
+    -- (The trigger we wrote earlier 'after_bill_insert' will automatically deduct the balance here)
+
+    RETURN v_new_bill_id;
+END;
+$$;
+
+
+ALTER FUNCTION public.issue_bill(p_student_id integer, p_vendor_id integer, p_total_amount numeric) OWNER TO postgres;
+
+--
+-- Name: process_student_recharge(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.process_student_recharge() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    AS $$
+BEGIN
+    -- Add the recharge amount to the student's active balance
+    UPDATE Student
+    SET balance = balance + NEW.amount
+    WHERE student_id = NEW.student_id;
+
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.process_student_recharge() OWNER TO postgres;
+
+--
+-- Name: request_settlement(integer); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.request_settlement(p_vendor_id integer) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    AS $$
+DECLARE
+    v_total_amount FLOAT;
+    v_new_settlement_id INT;
+BEGIN
+    -- 1. Calculate the total of all unsettled bills for this vendor
+    SELECT COALESCE(SUM(total_amount), 0) INTO v_total_amount
+    FROM Bill
+    WHERE vendor_id = p_vendor_id AND settlement_id IS NULL;
+
+    -- 2. Guard clause: Prevent empty settlements
+    IF v_total_amount = 0 THEN
+        RAISE EXCEPTION 'No unsettled bills found for this vendor.';
+    END IF;
+
+    -- 3. Create the settlement record
+    -- Note: admin_id is left NULL here since it hasn't been processed by an admin yet
+    INSERT INTO Settlement (vendor_id, admin_id,status, amount, date)
+    VALUES (p_vendor_id, 1,'requested', v_total_amount, CURRENT_DATE)
+    RETURNING settlement_id INTO v_new_settlement_id;
+
+    RETURN v_new_settlement_id;
+    
+    -- The trigger will automatically fire here to update the Bill table!
+END;
+$$;
+
+
+ALTER FUNCTION public.request_settlement(p_vendor_id integer) OWNER TO postgres;
+
+--
+-- Name: request_settlement(character varying); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.request_settlement(p_vendor_id character varying) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    AS $$
+DECLARE
+    v_total_amount FLOAT;
+    v_new_settlement_id INT;
+BEGIN
+    -- 1. Calculate the total of all unsettled bills for this vendor
+    SELECT COALESCE(SUM(total_amount), 0) INTO v_total_amount
+    FROM Bill
+    WHERE vendor_id = p_vendor_id AND settlement_id IS NULL;
+
+    -- 2. Guard clause: Prevent empty settlements
+    IF v_total_amount = 0 THEN
+        RAISE EXCEPTION 'No unsettled bills found for this vendor.';
+    END IF;
+
+    -- 3. Create the settlement record
+    -- Note: admin_id is left NULL here since it hasn't been processed by an admin yet
+    INSERT INTO Settlement (vendor_id, status, amount, date)
+    VALUES (p_vendor_id, 'PENDING', v_total_amount, CURRENT_DATE)
+    RETURNING settlement_id INTO v_new_settlement_id;
+
+    RETURN v_new_settlement_id;
+    
+    -- The trigger will automatically fire here to update the Bill table!
+END;
+$$;
+
+
+ALTER FUNCTION public.request_settlement(p_vendor_id character varying) OWNER TO postgres;
+
+--
+-- Name: set_spending_limit(integer, integer); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.set_spending_limit(p_student_id integer, p_spending_limit integer) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    AS $$
+
+BEGIN
+    UPDATE student
+    SET spending_limit = p_spending_limit
+    WHERE student_id = p_student_id;
+END;
+
+$$;
+
+
+ALTER FUNCTION public.set_spending_limit(p_student_id integer, p_spending_limit integer) OWNER TO postgres;
+
+--
+-- Name: trigger_update_student_balance(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.trigger_update_student_balance() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    AS $$
+BEGIN
+    -- Deduct the bill's total amount from the student's balance
+    UPDATE Student
+    SET balance = balance - NEW.total_amount
+    WHERE student_id = NEW.student_id;
+
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.trigger_update_student_balance() OWNER TO postgres;
+
+--
+-- Name: update_bills_after_settlement(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.update_bills_after_settlement() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    AS $$
+BEGIN
+    -- NEW is a special record containing the newly inserted row's data
+    UPDATE Bill
+    SET settlement_id = NEW.settlement_id
+    WHERE vendor_id = NEW.vendor_id AND settlement_id IS NULL;
+
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.update_bills_after_settlement() OWNER TO postgres;
+
+--
+-- Name: update_vendor_inventory(integer, integer, numeric, boolean); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.update_vendor_inventory(p_vendor_id integer, p_item_id integer, p_new_cost numeric, p_in_stock boolean) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    AS $$
+DECLARE
+    rows_affected INT;
+BEGIN
+    -- 1. Try to update the existing inventory row
+    UPDATE inventory
+    SET 
+        cost = p_new_cost,
+        in_stock = p_in_stock,
+        last_update_time = CURRENT_TIMESTAMP
+    WHERE vendor_id = p_vendor_id 
+      AND item_id = p_item_id;
+
+    -- 2. Check if the update actually modified any rows
+    GET DIAGNOSTICS rows_affected = ROW_COUNT;
+
+    -- 3. If no rows were updated, it means the item isn't in their inventory yet
+    IF rows_affected = 0 THEN
+        INSERT INTO inventory (vendor_id, item_id, cost, in_stock, last_update_time)
+        VALUES (p_vendor_id, p_item_id, p_new_cost, p_in_stock, CURRENT_TIMESTAMP);
+        
+        RETURN 'Success: New item added to inventory.';
+    ELSE
+        RETURN 'Success: Inventory updated.';
+    END IF;
+END;
+$$;
+
+
+ALTER FUNCTION public.update_vendor_inventory(p_vendor_id integer, p_item_id integer, p_new_cost numeric, p_in_stock boolean) OWNER TO postgres;
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
+
+--
+-- Name: student; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.student (
+    student_id integer NOT NULL,
+    first_name character varying(50) NOT NULL,
+    last_name character varying(50) NOT NULL,
+    email character varying(50),
+    phone character varying(15),
+    balance numeric(10,2) DEFAULT 0,
+    password_hash character varying(255),
+    spending_limit numeric(10,2),
+    CONSTRAINT student_balance_check CHECK ((balance >= (0)::numeric))
+);
+
+
+ALTER TABLE public.student OWNER TO postgres;
+
+--
+-- Name: active_student_limits; Type: VIEW; Schema: public; Owner: postgres
+--
+
+CREATE VIEW public.active_student_limits AS
+ SELECT student.student_id,
+    (((student.first_name)::text || ' '::text) || (student.last_name)::text) AS student_name,
+    student.balance AS current_wallet_balance,
+    student.spending_limit AS remaining_spending_limit
+   FROM public.student;
+
+
+ALTER TABLE public.active_student_limits OWNER TO postgres;
 
 --
 -- Name: admin; Type: TABLE; Schema: public; Owner: postgres
@@ -89,11 +426,25 @@ CREATE TABLE public.bank_account (
 ALTER TABLE public.bank_account OWNER TO postgres;
 
 --
+-- Name: bill_bill_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.bill_bill_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.bill_bill_id_seq OWNER TO postgres;
+
+--
 -- Name: bill; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.bill (
-    bill_id integer NOT NULL,
+    bill_id integer DEFAULT nextval('public.bill_bill_id_seq'::regclass) NOT NULL,
     student_id integer NOT NULL,
     vendor_id integer NOT NULL,
     settlement_id integer,
@@ -140,6 +491,20 @@ CREATE TABLE public.inventory (
 ALTER TABLE public.inventory OWNER TO postgres;
 
 --
+-- Name: inventory_inventory_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.inventory ALTER COLUMN inventory_id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.inventory_inventory_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
 -- Name: item; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -183,6 +548,20 @@ CREATE TABLE public.recharge (
 ALTER TABLE public.recharge OWNER TO postgres;
 
 --
+-- Name: recharge_recharge_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.recharge ALTER COLUMN recharge_id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.recharge_recharge_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
 -- Name: settlement; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -201,23 +580,18 @@ CREATE TABLE public.settlement (
 ALTER TABLE public.settlement OWNER TO postgres;
 
 --
--- Name: student; Type: TABLE; Schema: public; Owner: postgres
+-- Name: settlement_settlement_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
-CREATE TABLE public.student (
-    student_id integer NOT NULL,
-    first_name character varying(50) NOT NULL,
-    last_name character varying(50) NOT NULL,
-    email character varying(50),
-    phone character varying(15),
-    balance numeric(10,2) DEFAULT 0,
-    password_hash character varying(255),
-    spending_limit integer,
-    CONSTRAINT student_balance_check CHECK ((balance >= (0)::numeric))
+ALTER TABLE public.settlement ALTER COLUMN settlement_id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.settlement_settlement_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
 );
 
-
-ALTER TABLE public.student OWNER TO postgres;
 
 --
 -- Name: student_account; Type: TABLE; Schema: public; Owner: postgres
@@ -230,38 +604,6 @@ CREATE TABLE public.student_account (
 
 
 ALTER TABLE public.student_account OWNER TO postgres;
-
---
--- Name: vendor; Type: TABLE; Schema: public; Owner: postgres
---
-
-CREATE TABLE public.vendor (
-    vendor_id integer NOT NULL,
-    name character varying(100) NOT NULL,
-    email character varying(100) NOT NULL,
-    phone character varying(20),
-    password_hash character varying(255) NOT NULL
-);
-
-
-ALTER TABLE public.vendor OWNER TO postgres;
-
---
--- Name: student_bill_history; Type: VIEW; Schema: public; Owner: postgres
---
-
-CREATE VIEW public.student_bill_history AS
- SELECT b.bill_id,
-    b.date,
-    b.student_id,
-    v.vendor_id,
-    v.name AS vendor_name,
-    b.total_amount AS amount
-   FROM (public.bill b
-     JOIN public.vendor v USING (vendor_id));
-
-
-ALTER TABLE public.student_bill_history OWNER TO postgres;
 
 --
 -- Name: unsettled_requests; Type: VIEW; Schema: public; Owner: postgres
@@ -281,6 +623,21 @@ CREATE VIEW public.unsettled_requests AS
 ALTER TABLE public.unsettled_requests OWNER TO postgres;
 
 --
+-- Name: vendor; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.vendor (
+    vendor_id integer NOT NULL,
+    name character varying(100) NOT NULL,
+    email character varying(100) NOT NULL,
+    phone character varying(20),
+    password_hash character varying(255) NOT NULL
+);
+
+
+ALTER TABLE public.vendor OWNER TO postgres;
+
+--
 -- Name: vendor_account; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -291,6 +648,22 @@ CREATE TABLE public.vendor_account (
 
 
 ALTER TABLE public.vendor_account OWNER TO postgres;
+
+--
+-- Name: vendor_daily_sales; Type: VIEW; Schema: public; Owner: postgres
+--
+
+CREATE VIEW public.vendor_daily_sales AS
+ SELECT v.vendor_id,
+    v.name AS shop_name,
+    count(b.bill_id) AS total_transactions_today,
+    COALESCE(sum(b.total_amount), (0)::numeric) AS daily_revenue
+   FROM (public.vendor v
+     LEFT JOIN public.bill b ON (((v.vendor_id = b.vendor_id) AND (b.date = CURRENT_DATE) AND ((b.status)::text = 'completed'::text))))
+  GROUP BY v.vendor_id, v.name;
+
+
+ALTER TABLE public.vendor_daily_sales OWNER TO postgres;
 
 --
 -- Data for Name: admin; Type: TABLE DATA; Schema: public; Owner: postgres
@@ -368,33 +741,27 @@ COPY public.bank_account (bankaccount_id, bank_name, account_number, ifsc_code) 
 --
 
 COPY public.bill (bill_id, student_id, vendor_id, settlement_id, total_amount, date, status) FROM stdin;
-1	16	4	\N	459.12	2026-02-14	completed
 2	14	6	11	1975.97	2026-02-24	completed
 3	10	2	11	754.15	2026-02-19	completed
 4	3	3	13	342.80	2026-03-08	completed
 5	19	9	17	56.00	2026-03-01	completed
 6	9	8	16	2356.03	2026-02-22	completed
-7	1	10	13	2361.34	2026-02-27	completed
 8	27	2	16	490.07	2026-03-11	completed
 9	29	7	\N	1696.87	2026-02-10	completed
 10	3	5	\N	703.25	2026-03-09	completed
 11	10	8	18	92.89	2026-02-23	completed
 12	2	10	\N	1541.20	2026-03-11	completed
-13	25	4	3	1200.44	2026-02-13	completed
 14	13	7	\N	353.66	2026-03-09	completed
 15	7	7	15	1779.09	2026-02-27	completed
 16	30	8	17	460.51	2026-02-20	completed
 17	23	7	4	1246.82	2026-02-28	completed
-18	1	9	15	747.24	2026-03-08	completed
 19	13	1	19	324.91	2026-02-15	completed
 20	3	9	19	562.86	2026-02-12	completed
-21	17	4	\N	74.58	2026-02-20	completed
 22	23	3	\N	2251.17	2026-03-05	completed
 23	16	2	6	404.84	2026-03-06	completed
 24	30	3	10	471.29	2026-03-10	completed
 25	10	7	14	878.84	2026-02-10	completed
 26	8	10	19	653.61	2026-03-05	completed
-27	14	1	\N	441.54	2026-03-06	completed
 28	13	1	3	454.86	2026-02-25	completed
 29	23	6	16	115.59	2026-02-23	completed
 30	27	10	\N	1849.95	2026-03-09	completed
@@ -402,12 +769,26 @@ COPY public.bill (bill_id, student_id, vendor_id, settlement_id, total_amount, d
 32	13	2	7	1550.86	2026-02-16	completed
 33	24	8	\N	336.39	2026-02-24	completed
 34	7	6	\N	1230.60	2026-03-09	completed
-35	21	4	\N	490.16	2026-02-12	completed
 36	10	10	\N	1295.08	2026-02-16	completed
-37	1	10	\N	1493.10	2026-03-02	completed
 38	16	7	\N	85.78	2026-03-01	completed
 39	14	5	18	1776.27	2026-03-10	completed
 40	9	8	\N	458.78	2026-02-19	completed
+13	25	60	3	1200.44	2026-02-13	completed
+7	60	10	13	2361.34	2026-02-27	completed
+18	60	9	15	747.24	2026-03-08	completed
+37	60	10	\N	1493.10	2026-03-02	completed
+44	60	4	\N	150.50	2026-05-08	completed
+45	60	4	\N	150.50	2026-05-08	completed
+46	1	4	\N	150.50	2026-05-08	completed
+47	1	4	\N	150.50	2026-05-08	completed
+27	14	1	24	441.54	2026-03-06	completed
+1	16	60	25	459.12	2026-02-14	completed
+21	17	60	25	74.58	2026-02-20	completed
+35	21	60	25	490.16	2026-02-12	completed
+41	60	60	25	150.50	2026-05-02	completed
+42	60	60	25	150.50	2026-05-08	completed
+43	60	60	25	150.50	2026-05-08	completed
+48	1	4	\N	150.50	2026-05-08	completed
 \.
 
 
@@ -485,6 +866,9 @@ COPY public.inventory (inventory_id, item_id, vendor_id, cost, in_stock, last_up
 59	32	2	275.00	t	2026-03-12 01:32:42
 60	27	2	4.00	t	2026-03-12 01:32:42
 61	50	5	2.00	t	2026-04-23 02:20:27.942044
+62	1	60	60.00	t	2026-05-08 10:27:59.023056
+63	2	60	25.00	t	2026-05-08 10:28:18.797984
+64	6	60	20.00	f	2026-05-08 10:28:28.424166
 \.
 
 
@@ -591,6 +975,8 @@ COPY public.recharge (recharge_id, student_id, amount, date) FROM stdin;
 38	12	2000.00	2026-02-20
 39	18	1000.00	2026-02-04
 40	23	100.00	2026-01-13
+41	60	500.00	2026-05-08
+44	60	500.00	2026-05-08
 \.
 
 
@@ -601,7 +987,6 @@ COPY public.recharge (recharge_id, student_id, amount, date) FROM stdin;
 COPY public.settlement (settlement_id, vendor_id, admin_id, status, amount, date) FROM stdin;
 1	4	5	paid	1884.00	2026-03-03
 2	1	1	paid	1049.00	2026-02-25
-3	7	4	requested	745.00	2026-03-05
 4	5	3	requested	3473.00	2026-02-17
 5	4	1	requested	2257.00	2026-02-25
 6	6	3	paid	1160.00	2026-02-12
@@ -619,6 +1004,9 @@ COPY public.settlement (settlement_id, vendor_id, admin_id, status, amount, date
 18	7	3	requested	4498.00	2026-02-17
 19	4	2	paid	1402.00	2026-03-08
 20	8	1	requested	1409.00	2026-02-28
+3	7	1	paid	745.00	2026-03-05
+24	1	1	requested	441.54	2026-05-08
+25	60	1	requested	1475.36	2026-05-08
 \.
 
 
@@ -627,7 +1015,6 @@ COPY public.settlement (settlement_id, vendor_id, admin_id, status, amount, date
 --
 
 COPY public.student (student_id, first_name, last_name, email, phone, balance, password_hash, spending_limit) FROM stdin;
-1	Falguni	Bhakta	falgunibhakta1@campus.edu	00485130964	1985.16	4fb9e6e97d0d903	\N
 2	Chasmum	Choudhary	chasmumchoudhary2@campus.edu	01279746810	1947.39	755706149089e26	\N
 3	Gagan	Bir	gaganbir3@campus.edu	+911947126645	844.70	d1ccc7a1705dd30	\N
 4	Madhavi	Kalita	madhavikalita4@campus.edu	+910626873372	2480.07	66e1866a206ed7b	\N
@@ -657,6 +1044,9 @@ COPY public.student (student_id, first_name, last_name, email, phone, balance, p
 28	Aadi	Sagar	aadisagar28@campus.edu	1551619858	619.60	e1225c3e85619f0	\N
 29	Yatan	Raja	yatanraja29@campus.edu	+916758755101	181.67	7ab4666d835fd21	\N
 30	Mahika	Raghavan	mahikaraghavan30@campus.edu	05519527643	2123.93	60ee6ad51b90c91	\N
+55	Madhav	P Nair	madhavpnair707@gmail.com	8921799258	0.00	$2b$12$xg4TEWZKZx.HUlQGO0LF1eH1z7ya0ph1cRiN0KGOjTyszT5P8WlTu	1000.00
+60	Sasi	chettan	sasi1@gmail.com	9999999999	1000.00	$2b$12$qpxreZpd6oGmm35.SlroseJMSxWlglamSvdP47tElveg2qN0sFt/a	1000.00
+1	Falguni	Bhakta	falgunibhakta1@campus.edu	00485130964	781.16	4fb9e6e97d0d903	500.00
 \.
 
 
@@ -719,6 +1109,7 @@ COPY public.vendor (vendor_id, name, email, phone, password_hash) FROM stdin;
 8	Raju Omelette Centre	raju.v8@campus.edu	+914586080851	40f6f25b18597a3
 9	Chai Tapri	chai.v9@campus.edu	8259499401	cdecc2218f8d1d8
 10	Fresh Juice Corner	fresh.v10@campus.edu	2348263324	98f815366286ac2
+60	suku's canteen	suku@gmail.com	8888888888	$2b$12$K45d/NYu5m7KSyV83djRK.7vUGtO43a96IUXx7PPQxzY4.0W2Tqc.
 \.
 
 
@@ -742,6 +1133,34 @@ COPY public.vendor_account (bankaccount_id, vendor_id) FROM stdin;
 12	10
 10	9
 \.
+
+
+--
+-- Name: bill_bill_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
+--
+
+SELECT pg_catalog.setval('public.bill_bill_id_seq', 48, true);
+
+
+--
+-- Name: inventory_inventory_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
+--
+
+SELECT pg_catalog.setval('public.inventory_inventory_id_seq', 64, true);
+
+
+--
+-- Name: recharge_recharge_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
+--
+
+SELECT pg_catalog.setval('public.recharge_recharge_id_seq', 44, true);
+
+
+--
+-- Name: settlement_settlement_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
+--
+
+SELECT pg_catalog.setval('public.settlement_settlement_id_seq', 25, true);
 
 
 --
@@ -879,10 +1298,59 @@ CREATE INDEX idx_bill_total_amount ON public.bill USING btree (total_amount);
 
 
 --
+-- Name: idx_bill_unsettled; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_bill_unsettled ON public.bill USING btree (vendor_id) WHERE (settlement_id IS NULL);
+
+
+--
+-- Name: idx_inventory_item_lookup; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_inventory_item_lookup ON public.inventory USING btree (item_id) INCLUDE (vendor_id, cost, in_stock);
+
+
+--
+-- Name: idx_student_email_hash; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_student_email_hash ON public.student USING hash (email);
+
+
+--
 -- Name: idx_student_student_id; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX idx_student_student_id ON public.student USING btree (student_id);
+
+
+--
+-- Name: bill after_bill_insert; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER after_bill_insert AFTER INSERT ON public.bill FOR EACH ROW EXECUTE FUNCTION public.trigger_update_student_balance();
+
+
+--
+-- Name: recharge after_recharge_insert; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER after_recharge_insert AFTER INSERT ON public.recharge FOR EACH ROW EXECUTE FUNCTION public.process_student_recharge();
+
+
+--
+-- Name: settlement trigger_settlement_insert; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trigger_settlement_insert AFTER INSERT ON public.settlement FOR EACH ROW EXECUTE FUNCTION public.update_bills_after_settlement();
+
+
+--
+-- Name: bill trigger_update_spending_limit; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trigger_update_spending_limit AFTER INSERT ON public.bill FOR EACH ROW EXECUTE FUNCTION public.deduct_spending_limit();
 
 
 --
@@ -982,8 +1450,231 @@ ALTER TABLE ONLY public.vendor_account
 
 
 --
+-- Name: SCHEMA public; Type: ACL; Schema: -; Owner: postgres
+--
+
+GRANT USAGE ON SCHEMA public TO student_role;
+GRANT USAGE ON SCHEMA public TO vendor_role;
+GRANT USAGE ON SCHEMA public TO admin_role;
+
+
+--
+-- Name: FUNCTION approve_settlement(p_settlement_id integer, p_admin_id integer); Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON FUNCTION public.approve_settlement(p_settlement_id integer, p_admin_id integer) TO admin_role;
+
+
+--
+-- Name: FUNCTION compare_prices(p_item_id integer); Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON FUNCTION public.compare_prices(p_item_id integer) TO student_role;
+
+
+--
+-- Name: FUNCTION get_statement(p_student_id integer); Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON FUNCTION public.get_statement(p_student_id integer) TO student_role;
+
+
+--
+-- Name: FUNCTION issue_bill(p_student_id integer, p_vendor_id integer, p_total_amount numeric); Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON FUNCTION public.issue_bill(p_student_id integer, p_vendor_id integer, p_total_amount numeric) TO student_role;
+GRANT ALL ON FUNCTION public.issue_bill(p_student_id integer, p_vendor_id integer, p_total_amount numeric) TO vendor_role;
+
+
+--
+-- Name: FUNCTION request_settlement(p_vendor_id character varying); Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON FUNCTION public.request_settlement(p_vendor_id character varying) TO vendor_role;
+
+
+--
+-- Name: FUNCTION set_spending_limit(p_student_id integer, p_spending_limit integer); Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON FUNCTION public.set_spending_limit(p_student_id integer, p_spending_limit integer) TO student_role;
+
+
+--
+-- Name: FUNCTION update_vendor_inventory(p_vendor_id integer, p_item_id integer, p_new_cost numeric, p_in_stock boolean); Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON FUNCTION public.update_vendor_inventory(p_vendor_id integer, p_item_id integer, p_new_cost numeric, p_in_stock boolean) TO vendor_role;
+
+
+--
+-- Name: TABLE student; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT ON TABLE public.student TO student_role;
+GRANT SELECT ON TABLE public.student TO vendor_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.student TO admin_role;
+
+
+--
+-- Name: COLUMN student.spending_limit; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT UPDATE(spending_limit) ON TABLE public.student TO student_role;
+
+
+--
+-- Name: TABLE active_student_limits; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.active_student_limits TO admin_role;
+
+
+--
+-- Name: TABLE admin; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.admin TO admin_role;
+
+
+--
+-- Name: TABLE bank_account; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.bank_account TO admin_role;
+
+
+--
+-- Name: SEQUENCE bill_bill_id_seq; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,USAGE ON SEQUENCE public.bill_bill_id_seq TO student_role;
+GRANT SELECT,USAGE ON SEQUENCE public.bill_bill_id_seq TO vendor_role;
+GRANT ALL ON SEQUENCE public.bill_bill_id_seq TO admin_role;
+
+
+--
+-- Name: TABLE bill; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT ON TABLE public.bill TO student_role;
+GRANT SELECT ON TABLE public.bill TO vendor_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.bill TO admin_role;
+
+
+--
+-- Name: TABLE bill_item; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.bill_item TO admin_role;
+
+
+--
+-- Name: TABLE inventory; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT ON TABLE public.inventory TO student_role;
+GRANT SELECT,INSERT,UPDATE ON TABLE public.inventory TO vendor_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.inventory TO admin_role;
+
+
+--
+-- Name: SEQUENCE inventory_inventory_id_seq; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,USAGE ON SEQUENCE public.inventory_inventory_id_seq TO student_role;
+GRANT SELECT,USAGE ON SEQUENCE public.inventory_inventory_id_seq TO vendor_role;
+GRANT ALL ON SEQUENCE public.inventory_inventory_id_seq TO admin_role;
+
+
+--
+-- Name: TABLE item; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.item TO admin_role;
+
+
+--
+-- Name: TABLE my_inventory; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.my_inventory TO admin_role;
+
+
+--
+-- Name: TABLE recharge; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT ON TABLE public.recharge TO student_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.recharge TO admin_role;
+
+
+--
+-- Name: SEQUENCE recharge_recharge_id_seq; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,USAGE ON SEQUENCE public.recharge_recharge_id_seq TO student_role;
+GRANT SELECT,USAGE ON SEQUENCE public.recharge_recharge_id_seq TO vendor_role;
+GRANT ALL ON SEQUENCE public.recharge_recharge_id_seq TO admin_role;
+
+
+--
+-- Name: TABLE settlement; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT ON TABLE public.settlement TO vendor_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.settlement TO admin_role;
+
+
+--
+-- Name: SEQUENCE settlement_settlement_id_seq; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,USAGE ON SEQUENCE public.settlement_settlement_id_seq TO student_role;
+GRANT SELECT,USAGE ON SEQUENCE public.settlement_settlement_id_seq TO vendor_role;
+GRANT ALL ON SEQUENCE public.settlement_settlement_id_seq TO admin_role;
+
+
+--
+-- Name: TABLE student_account; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.student_account TO admin_role;
+
+
+--
+-- Name: TABLE unsettled_requests; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.unsettled_requests TO admin_role;
+
+
+--
+-- Name: TABLE vendor; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT ON TABLE public.vendor TO student_role;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.vendor TO admin_role;
+
+
+--
+-- Name: TABLE vendor_account; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.vendor_account TO admin_role;
+
+
+--
+-- Name: TABLE vendor_daily_sales; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.vendor_daily_sales TO admin_role;
+
+
+--
 -- PostgreSQL database dump complete
 --
 
-\unrestrict Hrie2OXfwdx46Qi41uZecbkCEm5qt4Wr83eo9YMcN0d5FHxIjgU7K3f8EIjfxsh
+\unrestrict yBxExnzcmBRTejlzOOLleZT3uZtuIi6nd1H2pU3d3ttPA14ycJxKwVFg5EhSCMR
 

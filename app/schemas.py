@@ -32,13 +32,14 @@ class StudentCreate(BaseModel):
     # Enforce max lengths to match your PostgreSQL column limits
     first_name: str = Field(..., max_length=20)
     last_name: str = Field(..., max_length=20)
-    email: EmailStr = Field(..., max_length=255) 
+    email: EmailStr
     phone: str = Field(..., max_length=15)
     
     # Password doesn't need a max_length here because it gets hashed to 60 chars anyway,
     # but you can add a min_length for security
     password: str = Field(..., min_length=4) 
-    spending_limit: Decimal
+    # spending_limit: Decimal
+    spending_limit: Decimal = Field(alias="weekly_spending_limit")
 
 class VendorCreate(BaseModel):
     vendor_id: int

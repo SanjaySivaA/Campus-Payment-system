@@ -35,3 +35,7 @@ WHERE student_id = 3;
 ALTER TABLE Student ALTER COLUMN password_hash TYPE VARCHAR(255);
 ALTER TABLE Vendor ALTER COLUMN password_hash TYPE VARCHAR(255);
 ALTER TABLE Admin ALTER COLUMN password_hash TYPE VARCHAR(255);
+
+-- query done by vendor to update inventory
+SELECT update_vendor_inventory(2, 101, 750.00, TRUE);
+
