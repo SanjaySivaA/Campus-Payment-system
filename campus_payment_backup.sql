@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict yBxExnzcmBRTejlzOOLleZT3uZtuIi6nd1H2pU3d3ttPA14ycJxKwVFg5EhSCMR
+\restrict fX3m2M0PvPyMgseJBG7oZUnT00I32r6hhDUeqhAbkIeep1lSSoJnkrYJtdKlKJH
 
 -- Dumped from database version 14.22 (Ubuntu 14.22-0ubuntu0.22.04.1)
 -- Dumped by pg_dump version 14.22 (Ubuntu 14.22-0ubuntu0.22.04.1)
@@ -741,54 +741,56 @@ COPY public.bank_account (bankaccount_id, bank_name, account_number, ifsc_code) 
 --
 
 COPY public.bill (bill_id, student_id, vendor_id, settlement_id, total_amount, date, status) FROM stdin;
+13	25	60	27	1200.44	2026-02-13	completed
+1	16	60	27	459.12	2026-02-14	completed
+21	17	60	27	74.58	2026-02-20	completed
+35	21	60	27	490.16	2026-02-12	completed
+41	60	60	27	150.50	2026-05-02	completed
+42	60	60	27	150.50	2026-05-08	completed
+43	60	60	27	150.50	2026-05-08	completed
+9	29	60	27	1696.87	2026-02-10	completed
+10	3	60	27	703.25	2026-03-09	completed
+12	2	60	27	1541.20	2026-03-11	completed
+14	13	60	27	353.66	2026-03-09	completed
+22	23	60	27	2251.17	2026-03-05	completed
+30	27	60	27	1849.95	2026-03-09	completed
+33	24	60	27	336.39	2026-02-24	completed
+34	7	60	27	1230.60	2026-03-09	completed
+36	10	60	27	1295.08	2026-02-16	completed
+38	16	60	27	85.78	2026-03-01	completed
 2	14	6	11	1975.97	2026-02-24	completed
 3	10	2	11	754.15	2026-02-19	completed
 4	3	3	13	342.80	2026-03-08	completed
 5	19	9	17	56.00	2026-03-01	completed
 6	9	8	16	2356.03	2026-02-22	completed
+40	9	60	27	458.78	2026-02-19	completed
 8	27	2	16	490.07	2026-03-11	completed
-9	29	7	\N	1696.87	2026-02-10	completed
-10	3	5	\N	703.25	2026-03-09	completed
+37	60	60	27	1493.10	2026-03-02	completed
+44	60	60	27	150.50	2026-05-08	completed
 11	10	8	18	92.89	2026-02-23	completed
-12	2	10	\N	1541.20	2026-03-11	completed
-14	13	7	\N	353.66	2026-03-09	completed
+45	60	60	27	150.50	2026-05-08	completed
+46	1	60	27	150.50	2026-05-08	completed
+47	1	60	27	150.50	2026-05-08	completed
 15	7	7	15	1779.09	2026-02-27	completed
 16	30	8	17	460.51	2026-02-20	completed
 17	23	7	4	1246.82	2026-02-28	completed
+48	1	60	27	150.50	2026-05-08	completed
 19	13	1	19	324.91	2026-02-15	completed
 20	3	9	19	562.86	2026-02-12	completed
-22	23	3	\N	2251.17	2026-03-05	completed
+49	60	60	\N	100.00	2026-05-08	completed
+50	1	4	\N	150.50	2026-05-08	completed
 23	16	2	6	404.84	2026-03-06	completed
 24	30	3	10	471.29	2026-03-10	completed
 25	10	7	14	878.84	2026-02-10	completed
 26	8	10	19	653.61	2026-03-05	completed
 28	13	1	3	454.86	2026-02-25	completed
 29	23	6	16	115.59	2026-02-23	completed
-30	27	10	\N	1849.95	2026-03-09	completed
 31	11	9	13	585.78	2026-03-02	completed
 32	13	2	7	1550.86	2026-02-16	completed
-33	24	8	\N	336.39	2026-02-24	completed
-34	7	6	\N	1230.60	2026-03-09	completed
-36	10	10	\N	1295.08	2026-02-16	completed
-38	16	7	\N	85.78	2026-03-01	completed
 39	14	5	18	1776.27	2026-03-10	completed
-40	9	8	\N	458.78	2026-02-19	completed
-13	25	60	3	1200.44	2026-02-13	completed
 7	60	10	13	2361.34	2026-02-27	completed
 18	60	9	15	747.24	2026-03-08	completed
-37	60	10	\N	1493.10	2026-03-02	completed
-44	60	4	\N	150.50	2026-05-08	completed
-45	60	4	\N	150.50	2026-05-08	completed
-46	1	4	\N	150.50	2026-05-08	completed
-47	1	4	\N	150.50	2026-05-08	completed
 27	14	1	24	441.54	2026-03-06	completed
-1	16	60	25	459.12	2026-02-14	completed
-21	17	60	25	74.58	2026-02-20	completed
-35	21	60	25	490.16	2026-02-12	completed
-41	60	60	25	150.50	2026-05-02	completed
-42	60	60	25	150.50	2026-05-08	completed
-43	60	60	25	150.50	2026-05-08	completed
-48	1	4	\N	150.50	2026-05-08	completed
 \.
 
 
@@ -866,9 +868,9 @@ COPY public.inventory (inventory_id, item_id, vendor_id, cost, in_stock, last_up
 59	32	2	275.00	t	2026-03-12 01:32:42
 60	27	2	4.00	t	2026-03-12 01:32:42
 61	50	5	2.00	t	2026-04-23 02:20:27.942044
-62	1	60	60.00	t	2026-05-08 10:27:59.023056
 63	2	60	25.00	t	2026-05-08 10:28:18.797984
 64	6	60	20.00	f	2026-05-08 10:28:28.424166
+62	1	60	20.00	t	2026-05-08 13:24:52.941429
 \.
 
 
@@ -1007,6 +1009,8 @@ COPY public.settlement (settlement_id, vendor_id, admin_id, status, amount, date
 3	7	1	paid	745.00	2026-03-05
 24	1	1	requested	441.54	2026-05-08
 25	60	1	requested	1475.36	2026-05-08
+26	60	1	requested	14048.33	2026-05-08
+27	60	1	requested	16724.13	2026-05-08
 \.
 
 
@@ -1044,9 +1048,9 @@ COPY public.student (student_id, first_name, last_name, email, phone, balance, p
 28	Aadi	Sagar	aadisagar28@campus.edu	1551619858	619.60	e1225c3e85619f0	\N
 29	Yatan	Raja	yatanraja29@campus.edu	+916758755101	181.67	7ab4666d835fd21	\N
 30	Mahika	Raghavan	mahikaraghavan30@campus.edu	05519527643	2123.93	60ee6ad51b90c91	\N
+60	Sasi	chettan	sasi1@gmail.com	9999999999	900.00	$2b$12$qpxreZpd6oGmm35.SlroseJMSxWlglamSvdP47tElveg2qN0sFt/a	900.00
+1	Falguni	Bhakta	falgunibhakta1@campus.edu	00485130964	630.66	4fb9e6e97d0d903	500.00
 55	Madhav	P Nair	madhavpnair707@gmail.com	8921799258	0.00	$2b$12$xg4TEWZKZx.HUlQGO0LF1eH1z7ya0ph1cRiN0KGOjTyszT5P8WlTu	1000.00
-60	Sasi	chettan	sasi1@gmail.com	9999999999	1000.00	$2b$12$qpxreZpd6oGmm35.SlroseJMSxWlglamSvdP47tElveg2qN0sFt/a	1000.00
-1	Falguni	Bhakta	falgunibhakta1@campus.edu	00485130964	781.16	4fb9e6e97d0d903	500.00
 \.
 
 
@@ -1139,14 +1143,14 @@ COPY public.vendor_account (bankaccount_id, vendor_id) FROM stdin;
 -- Name: bill_bill_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('public.bill_bill_id_seq', 48, true);
+SELECT pg_catalog.setval('public.bill_bill_id_seq', 50, true);
 
 
 --
 -- Name: inventory_inventory_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('public.inventory_inventory_id_seq', 64, true);
+SELECT pg_catalog.setval('public.inventory_inventory_id_seq', 65, true);
 
 
 --
@@ -1160,7 +1164,7 @@ SELECT pg_catalog.setval('public.recharge_recharge_id_seq', 44, true);
 -- Name: settlement_settlement_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('public.settlement_settlement_id_seq', 25, true);
+SELECT pg_catalog.setval('public.settlement_settlement_id_seq', 27, true);
 
 
 --
@@ -1656,6 +1660,7 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.unsettled_requests TO admin_ro
 
 GRANT SELECT ON TABLE public.vendor TO student_role;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.vendor TO admin_role;
+GRANT SELECT ON TABLE public.vendor TO vendor_role;
 
 
 --
@@ -1676,5 +1681,5 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.vendor_daily_sales TO admin_ro
 -- PostgreSQL database dump complete
 --
 
-\unrestrict yBxExnzcmBRTejlzOOLleZT3uZtuIi6nd1H2pU3d3ttPA14ycJxKwVFg5EhSCMR
+\unrestrict fX3m2M0PvPyMgseJBG7oZUnT00I32r6hhDUeqhAbkIeep1lSSoJnkrYJtdKlKJH
 
