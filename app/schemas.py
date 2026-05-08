@@ -131,3 +131,8 @@ class SettlementItem(BaseModel):
     amount: Decimal
     date: date
     status: str
+
+
+class BillCreate(BaseModel):
+    student_id: int
+    total_amount: Decimal

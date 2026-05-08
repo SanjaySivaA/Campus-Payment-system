@@ -166,6 +166,14 @@ export const api = {
     request<{ settlement_id: number; message: string }>(`/vendors/${vendorId}/settlements`, {
       method: "POST",
     }),
+  
+  // Add this inside your export const api = { ... } object in lib/api.ts
+
+  issueBill: (vendorId: number, studentId: number, totalAmount: number) =>
+    request<{ bill_id: number; message: string }>(`/vendors/${vendorId}/bills`, {
+      method: "POST",
+      body: JSON.stringify({ student_id: studentId, total_amount: totalAmount }),
+    }),
 
   getAllSettlements: () =>
     request<Settlement[]>("/admin/settlements"),

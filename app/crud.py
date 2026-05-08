@@ -168,3 +168,12 @@ def approve_settlement(conn, settlement_id: int, admin_id: int):
         cur.execute("SELECT approve_settlement(%s, %s);", (settlement_id, admin_id))
         conn.commit()
 
+
+
+def issue_bill(conn, vendor_id: int, student_id: int, total_amount):
+    with conn.cursor() as cur:
+        # Calls the issue_bill function from your functions.sql
+        cur.execute("SELECT issue_bill(%s, %s, %s) as new_bill_id;", 
+                    (student_id, vendor_id, total_amount))
+        conn.commit()
+        return cur.fetchone()['new_bill_id']

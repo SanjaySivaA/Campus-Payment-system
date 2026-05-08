@@ -8,10 +8,12 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { TrendingUp, Receipt, Package, Wallet, ArrowUpRight, Loader2 } from "lucide-react";
+import { PlusCircle } from "lucide-react";
 
 const nav = [
   { to: "/vendor", label: "Overview" },
   { to: "/vendor/sales", label: "Sales" },
+  { to: "/vendor/issue-bill", label: "Issue Bill" },
   { to: "/vendor/inventory", label: "Inventory" },
   { to: "/vendor/settlements", label: "Settlements" },
 ];
@@ -40,6 +42,8 @@ const Overview = () => {
     { label: "This week", value: `₹${week}`, icon: Receipt, grad: "bg-gradient-accent" },
     { label: "Pending settlement", value: `₹${pending}`, icon: Wallet, grad: "bg-gradient-hero" },
   ];
+
+  
 
   return (
     <Wrap>
@@ -74,6 +78,85 @@ const Overview = () => {
           </div>
           <ArrowUpRight className="h-5 w-5 text-muted-foreground group-hover:text-primary" />
         </a>
+      </div>
+    </Wrap>
+  );
+};
+
+// 2. CREATE THE ISSUE BILL COMPONENT
+const IssueBill = () => {
+  const session = auth.get()!;
+  const [studentId, setStudentId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await api.issueBill(session.userId, Number(studentId), Number(amount));
+      toast.success(`Bill issued to Student #${studentId} for ₹${amount}`);
+      setStudentId("");
+      setAmount("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to issue bill");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Wrap>
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold">Issue New Bill</h1>
+        <p className="text-muted-foreground">Charge a student directly from their wallet balance</p>
+      </div>
+
+      <div className="max-w-xl rounded-2xl border bg-card p-8 shadow-card">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="h-12 w-12 rounded-xl bg-gradient-accent flex items-center justify-center text-primary-foreground shadow-glow">
+            <PlusCircle className="h-6 w-6" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold">Create Transaction</h2>
+            <p className="text-sm text-muted-foreground">Enter the student's ID and bill total</p>
+          </div>
+        </div>
+
+        <form onSubmit={submit} className="space-y-5">
+          <div>
+            <Label>Student ID</Label>
+            <Input 
+              type="number" 
+              min={1} 
+              required 
+              value={studentId} 
+              onChange={(e) => setStudentId(e.target.value)} 
+              className="h-12" 
+              placeholder="e.g. 101" 
+            />
+          </div>
+          <div>
+            <Label>Bill Amount (₹)</Label>
+            <Input 
+              type="number" 
+              min={1} 
+              step="0.01"
+              required 
+              value={amount} 
+              onChange={(e) => setAmount(e.target.value)} 
+              className="h-14 text-2xl font-bold text-primary" 
+              placeholder="0.00" 
+            />
+          </div>
+          <Button 
+            type="submit" 
+            disabled={loading} 
+            className="w-full h-12 bg-gradient-accent text-accent-foreground border-0 shadow-soft hover:shadow-glow transition-smooth"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : `Charge ₹${amount || 0}`}
+          </Button>
+        </form>
       </div>
     </Wrap>
   );
@@ -304,6 +387,7 @@ const VendorDashboard = () => (
     <Route path="inventory" element={<Inventory />} />
     <Route path="settlements" element={<Settlements />} />
     <Route path="*" element={<Navigate to="/vendor" replace />} />
+    <Route path="issue-bill" element={<IssueBill />} />
   </Routes>
 );
 

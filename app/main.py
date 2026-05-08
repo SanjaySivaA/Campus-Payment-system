@@ -333,6 +333,17 @@ def vendor_request_settlement(vendor_id: int, conn = Depends(get_role_db_conn)):
         conn.rollback()
         raise HTTPException(status_code=400, detail=str(e))
 
+
+@app.post("/vendors/{vendor_id}/bills")
+def create_bill(vendor_id: int, req: schemas.BillCreate, conn = Depends(get_role_db_conn)):
+    try:
+        new_id = crud.issue_bill(conn, vendor_id, req.student_id, req.total_amount)
+        return {"bill_id": new_id, "message": f"Bill issued successfully to student {req.student_id}"}
+    except Exception as e:
+        conn.rollback()
+        # Captures PostgreSQL exceptions (e.g., spending limit exceeded, insufficient funds)
+        raise HTTPException(status_code=400, detail=str(e))
+
 # ----------------- Admin Dashboard Endpoints ----------------- #
 
 # PROTECTED: Uses get_role_db_conn
